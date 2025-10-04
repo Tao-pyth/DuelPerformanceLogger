@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from kivymd.app import MDApp
 from kivymd.uix.screenmanager import MDScreenManager
 from kivymd.uix.screen import MDScreen
@@ -18,6 +20,33 @@ from kivymd.toast import toast
 
 # 日本語フォント設定
 LabelBase.register(DEFAULT_FONT, r'resource\\theme\\font\\mgenplus-1c-regular.ttf')
+
+
+class _FallbackAppState:
+    """Provide default attributes when no running MDApp is available."""
+
+    def __init__(self):
+        self.theme_cls = SimpleNamespace(primary_color=(0.2, 0.6, 0.86, 1))
+        self.reset()
+
+    def reset(self):
+        self.decks = []
+        self.seasons = []
+        self.match_records = []
+        self.current_match_settings = None
+        self.current_match_count = 0
+
+
+_fallback_app_state = _FallbackAppState()
+
+
+def get_app_state():
+    """Return the running app instance or a fallback with default attributes."""
+
+    app = MDApp.get_running_app()
+    if app is None:
+        return _fallback_app_state
+    return app
 
 
 def build_header(title, back_callback=None):
@@ -299,7 +328,7 @@ class DeckRegistrationScreen(BaseManagedScreen):
             return
 
         # 既存データとの重複チェック
-        app = MDApp.get_running_app()
+        app = get_app_state()
         if any(deck["name"] == name for deck in app.decks):
             toast("同じ名前のデッキが既に登録されています")
             return
@@ -317,7 +346,7 @@ class DeckRegistrationScreen(BaseManagedScreen):
 
     def update_deck_list(self):
         # アプリ全体のデッキ情報を参照して表示を更新
-        app = MDApp.get_running_app()
+        app = get_app_state()
         if not app.decks:
             self.deck_list_label.text = "登録済みデッキはありません"
         else:
@@ -371,7 +400,7 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             return
 
         # 既存シーズンと名前が重ならないかチェック
-        app = MDApp.get_running_app()
+        app = get_app_state()
         if any(season["name"] == name for season in app.seasons):
             toast("同じ名前のシーズンが既に登録されています")
             return
@@ -389,7 +418,7 @@ class SeasonRegistrationScreen(BaseManagedScreen):
 
     def update_season_list(self):
         # 保持しているシーズン情報を整形し、利用者へ提示
-        app = MDApp.get_running_app()
+        app = get_app_state()
         if not app.seasons:
             self.season_list_label.text = "登録済みシーズンはありません"
         else:
@@ -431,7 +460,7 @@ class MatchSetupScreen(BaseManagedScreen):
 
     def open_deck_menu(self):
         # 登録済みデッキから選択肢を生成しドロップダウンで表示
-        app = MDApp.get_running_app()
+        app = get_app_state()
         if not app.decks:
             toast("まずはデッキを登録してください")
             return
@@ -471,7 +500,7 @@ class MatchSetupScreen(BaseManagedScreen):
             return
 
         # 設定値をアプリ全体の状態として保持
-        app = MDApp.get_running_app()
+        app = get_app_state()
         app.current_match_settings = {
             "count": initial_count,
             "deck_name": self.selected_deck,
@@ -521,8 +550,8 @@ class MatchEntryScreen(BaseManagedScreen):
         row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(40))
         buttons = []
 
-        app = MDApp.get_running_app()
-        primary_color = getattr(app.theme_cls, "primary_color", (0.2, 0.6, 0.86, 1)) if app else (0.2, 0.6, 0.86, 1)
+        app = get_app_state()
+        primary_color = getattr(app.theme_cls, "primary_color", (0.2, 0.6, 0.86, 1))
 
         for option in options:
             button = MDFlatButton(text=option, theme_text_color="Custom")
@@ -544,11 +573,8 @@ class MatchEntryScreen(BaseManagedScreen):
         return row
 
     def _update_toggle_style(self, buttons, selected_value):
-        app = MDApp.get_running_app()
-        if app:
-            primary = app.theme_cls.primary_color
-        else:
-            primary = (0.2, 0.6, 0.86, 1)
+        app = get_app_state()
+        primary = getattr(app.theme_cls, "primary_color", (0.2, 0.6, 0.86, 1))
 
         for button in buttons:
             if button.text == selected_value:
@@ -559,7 +585,7 @@ class MatchEntryScreen(BaseManagedScreen):
                 button.text_color = primary
 
     def on_pre_enter(self):
-        app = MDApp.get_running_app()
+        app = get_app_state()
         settings = getattr(app, "current_match_settings", None)
         if not settings:
             # 初期設定がなければ入力を促すメッセージを表示
@@ -583,7 +609,7 @@ class MatchEntryScreen(BaseManagedScreen):
         self._update_toggle_style(self.result_buttons, choice)
 
     def submit_match(self):
-        app = MDApp.get_running_app()
+        app = get_app_state()
         settings = getattr(app, "current_match_settings", None)
         if not settings:
             toast("開始画面で初期情報を設定してください")
@@ -664,7 +690,7 @@ class StatsScreen(BaseManagedScreen):
 
     def open_deck_menu(self):
         # 登録済みデッキから絞り込み候補を作成
-        app = MDApp.get_running_app()
+        app = get_app_state()
         if not app.decks:
             toast("デッキが登録されていません")
             return
@@ -701,7 +727,7 @@ class StatsScreen(BaseManagedScreen):
 
     def update_stats(self):
         # 試合記録から統計情報を計算し、表示内容を組み立てる
-        app = MDApp.get_running_app()
+        app = get_app_state()
         records = app.match_records
         if self.selected_deck:
             records = [r for r in records if r["deck_name"] == self.selected_deck]
@@ -739,7 +765,9 @@ class SettingsScreen(BaseManagedScreen):
 
     def exit_app(self):
         # アプリを終了しウィンドウを閉じる
-        MDApp.get_running_app().stop()
+        app = MDApp.get_running_app()
+        if app:
+            app.stop()
         Window.close()
 
 class DeckAnalyzerApp(MDApp):
@@ -750,6 +778,8 @@ class DeckAnalyzerApp(MDApp):
         self.match_records = []
         self.current_match_settings = None
         self.current_match_count = 0
+        _fallback_app_state.reset()
+        _fallback_app_state.theme_cls.primary_color = self.theme_cls.primary_color
         sm = MDScreenManager()
         sm.add_widget(MenuScreen(name="menu"))
         sm.add_widget(DeckRegistrationScreen(name="deck_register"))
