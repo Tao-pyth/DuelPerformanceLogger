@@ -524,7 +524,7 @@ class MatchEntryScreen(BaseManagedScreen):
         chips = []
         for option in options:
             # 各選択肢をトグル可能なチップとして追加
-            chip = MDChip(text=option, check=True)
+            chip = MDChip(text=option, type="choice")
             chip.bind(on_release=lambda chip, value=option: callback(value))
             row.add_widget(chip)
             chips.append(chip)
@@ -537,7 +537,7 @@ class MatchEntryScreen(BaseManagedScreen):
         row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(40))
         self.result_chips = []
         for option in ["勝ち", "負け"]:
-            chip = MDChip(text=option, check=True)
+            chip = MDChip(text=option, type="choice")
             chip.bind(on_release=lambda chip, value=option: self.set_result_choice(value))
             row.add_widget(chip)
             self.result_chips.append(chip)
