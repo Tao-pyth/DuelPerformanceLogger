@@ -9,7 +9,6 @@ from kivymd.uix.button import MDRaisedButton, MDFlatButton
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.list import OneLineListItem
-from kivymd.uix.chip import MDChip
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 from kivy.metrics import dp
@@ -488,8 +487,8 @@ class MatchEntryScreen(BaseManagedScreen):
         super().__init__(**kwargs)
         self.turn_choice = None
         self.result_choice = None
-        self.turn_chips = []
-        self.result_chips = []
+        self.turn_buttons = []
+        self.result_buttons = []
 
         self.status_label = MDLabel(text="対戦データ入力を開始してください", halign="center")
         self.opponent_field = MDTextField(hint_text="対戦相手使用デッキ")
@@ -504,11 +503,11 @@ class MatchEntryScreen(BaseManagedScreen):
         )
         layout.add_widget(self.status_label)
         layout.add_widget(MDLabel(text="先攻/後攻を選択", theme_text_color="Secondary"))
-        layout.add_widget(self._build_chip_row(["先攻", "後攻"], self.set_turn_choice))
+        layout.add_widget(self._build_toggle_row(["先攻", "後攻"], self.set_turn_choice, "turn_buttons"))
         layout.add_widget(self.opponent_field)
         layout.add_widget(self.keyword_field)
         layout.add_widget(MDLabel(text="対戦結果を選択", theme_text_color="Secondary"))
-        layout.add_widget(self._build_result_row())
+        layout.add_widget(self._build_toggle_row(["勝ち", "負け"], self.set_result_choice, "result_buttons"))
         layout.add_widget(
             MDRaisedButton(text="結果を記録", on_press=lambda *_: self.submit_match())
         )
@@ -516,32 +515,48 @@ class MatchEntryScreen(BaseManagedScreen):
 
         self.add_widget(layout)
 
-    def _build_chip_row(self, options, callback):
-        # チップを横並びで表示する行レイアウトを準備
+    def _build_toggle_row(self, options, callback, attr_name):
+        """指定した選択肢をトグル可能なボタン行として構築する."""
+
         row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(40))
-        if callback == self.set_turn_choice:
-            self.turn_chips = []
-        chips = []
+        buttons = []
+
+        app = MDApp.get_running_app()
+        primary_color = getattr(app.theme_cls, "primary_color", (0.2, 0.6, 0.86, 1)) if app else (0.2, 0.6, 0.86, 1)
+
         for option in options:
-            # 各選択肢をトグル可能なチップとして追加
-            chip = MDChip(text=option, type="choice")
-            chip.bind(on_release=lambda chip, value=option: callback(value))
-            row.add_widget(chip)
-            chips.append(chip)
+            button = MDFlatButton(text=option, theme_text_color="Custom")
+            button.size_hint_y = None
+            button.height = dp(40)
+            button.md_bg_color = (0, 0, 0, 0)
+            button.text_color = primary_color
 
-        if callback == self.set_turn_choice:
-            self.turn_chips = chips
+            def make_callback(value):
+                return lambda *_: callback(value)
+
+            button.bind(on_release=make_callback(option))
+            row.add_widget(button)
+            buttons.append(button)
+
+        setattr(self, attr_name, buttons)
+        self._update_toggle_style(buttons, None)
+
         return row
 
-    def _build_result_row(self):
-        row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(40))
-        self.result_chips = []
-        for option in ["勝ち", "負け"]:
-            chip = MDChip(text=option, type="choice")
-            chip.bind(on_release=lambda chip, value=option: self.set_result_choice(value))
-            row.add_widget(chip)
-            self.result_chips.append(chip)
-        return row
+    def _update_toggle_style(self, buttons, selected_value):
+        app = MDApp.get_running_app()
+        if app:
+            primary = app.theme_cls.primary_color
+        else:
+            primary = (0.2, 0.6, 0.86, 1)
+
+        for button in buttons:
+            if button.text == selected_value:
+                button.md_bg_color = primary
+                button.text_color = (1, 1, 1, 1)
+            else:
+                button.md_bg_color = (0, 0, 0, 0)
+                button.text_color = primary
 
     def on_pre_enter(self):
         app = MDApp.get_running_app()
@@ -558,16 +573,14 @@ class MatchEntryScreen(BaseManagedScreen):
         self.reset_inputs()
 
     def set_turn_choice(self, choice):
-        # 選択されたチップのみアクティブ状態にする
+        # 選択されたボタンのみアクティブ状態にする
         self.turn_choice = choice
-        for chip in self.turn_chips:
-            chip.active = chip.text == choice
+        self._update_toggle_style(self.turn_buttons, choice)
 
     def set_result_choice(self, choice):
         # 勝敗選択も同様にアクティブ表示を切り替える
         self.result_choice = choice
-        for chip in self.result_chips:
-            chip.active = chip.text == choice
+        self._update_toggle_style(self.result_buttons, choice)
 
     def submit_match(self):
         app = MDApp.get_running_app()
@@ -605,13 +618,11 @@ class MatchEntryScreen(BaseManagedScreen):
         toast("対戦結果を記録しました")
 
     def reset_inputs(self):
-        # チップ・テキストフィールドを初期状態に戻す
+        # トグルボタンとテキストフィールドを初期状態に戻す
         self.turn_choice = None
         self.result_choice = None
-        for chip in self.turn_chips:
-            chip.active = False
-        for chip in self.result_chips:
-            chip.active = False
+        self._update_toggle_style(self.turn_buttons, None)
+        self._update_toggle_style(self.result_buttons, None)
         self.opponent_field.text = ""
         self.keyword_field.text = ""
 
