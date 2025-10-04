@@ -1,0 +1,113 @@
+{
+  "common": {
+    "back": "戻る",
+    "back_to_menu": "メニューに戻る",
+    "return_to_top": "トップに戻る",
+    "open": "開く",
+    "register": "登録する",
+    "start_input": "入力開始",
+    "start_screen_back": "開始画面に戻る",
+    "clear_filter": "絞り込み解除",
+    "filter_by_deck": "使用デッキで絞り込み",
+    "filter_label": "絞り込み: {deck_name}",
+    "filter_all": "すべてのデッキ",
+    "no_description": "説明なし",
+    "app_settings": "アプリケーション設定",
+    "exit": "終了",
+    "version": "バージョン 0.1.0",
+    "required_helper": "必須項目です"
+  },
+  "menu": {
+    "title": "デュエルパフォーマンスログ",
+    "hero_title": "デッキ分析ツールへようこそ",
+    "hero_body": "試合結果とカード情報をまとめて管理し、\nデッキの改善ポイントを見つけましょう。",
+    "primary_action": "試合を記録する",
+    "secondary_action": "統計を見る",
+    "options": {
+      "deck_register": {
+        "title": "使用デッキ情報登録",
+        "description": "対戦で使用するデッキの名称と説明を管理します。"
+      },
+      "season_register": {
+        "title": "シーズン情報登録",
+        "description": "大会や期間の情報をまとめて記録します。"
+      },
+      "match_setup": {
+        "title": "対戦データ入力",
+        "description": "試合の初期情報を設定して記録を始めます。"
+      },
+      "stats": {
+        "title": "対戦結果統計",
+        "description": "条件で絞り込んだ勝率などの統計を確認します。"
+      },
+      "settings": {
+        "title": "設定",
+        "description": "終了操作などの各種設定を行います。"
+      }
+    }
+  },
+  "deck_registration": {
+    "header_title": "使用デッキ情報登録",
+    "name_hint": "デッキ名",
+    "description_hint": "デッキ説明",
+    "empty_message": "登録済みデッキはありません",
+    "toast_missing_name": "デッキ名を入力してください",
+    "toast_duplicate": "同じ名前のデッキが既に登録されています",
+    "toast_registered": "デッキを登録しました"
+  },
+  "season_registration": {
+    "header_title": "シーズン情報登録",
+    "name_hint": "シーズン名",
+    "description_hint": "シーズン説明",
+    "empty_message": "登録済みシーズンはありません",
+    "toast_missing_name": "シーズン名を入力してください",
+    "toast_duplicate": "同じ名前のシーズンが既に登録されています",
+    "toast_registered": "シーズンを登録しました"
+  },
+  "match_setup": {
+    "header_title": "対戦データ入力開始",
+    "count_hint": "対戦カウント初期値",
+    "deck_button_default": "使用デッキを選択",
+    "start_button": "入力開始",
+    "toast_no_decks": "まずはデッキを登録してください",
+    "toast_select_deck": "使用デッキを選択してください",
+    "toast_invalid_count": "対戦カウントには数字を入力してください",
+    "toast_start": "対戦データ入力を開始します",
+    "selected_deck_label": "使用デッキ: {deck_name}"
+  },
+  "match_entry": {
+    "header_title": "対戦データ入力",
+    "status_default": "対戦データ入力を開始してください",
+    "opponent_hint": "対戦相手使用デッキ",
+    "keyword_hint": "キーワード (カンマ区切り)",
+    "turn_prompt": "先攻/後攻を選択",
+    "turn_options": ["先攻", "後攻"],
+    "result_prompt": "対戦結果を選択",
+    "result_options": ["勝ち", "負け"],
+    "record_button": "結果を記録",
+    "back_button": "開始画面に戻る",
+    "status_missing_setup": "開始画面から初期情報を設定してください",
+    "status_summary": "対戦カウント: {count} / 使用デッキ: {deck_name}",
+    "toast_missing_setup": "開始画面で初期情報を設定してください",
+    "toast_select_turn": "先攻/後攻を選択してください",
+    "toast_select_result": "対戦結果を選択してください",
+    "toast_recorded": "対戦結果を記録しました"
+  },
+  "stats": {
+    "header_title": "対戦結果統計",
+    "no_data": "まだ統計を表示できるデータがありません",
+    "filter_button": "使用デッキで絞り込み",
+    "toast_no_decks": "デッキが登録されていません",
+    "filter_label": "絞り込み: {deck_name}",
+    "filter_all": "すべてのデッキ",
+    "no_data_for_deck": "{deck_name} のデータはまだありません",
+    "summary_template": "{header}\\n対戦数: {total}\\n勝利: {wins}\\n敗北: {losses}\\n勝率: {win_rate:.1f}%"
+  },
+  "settings": {
+    "header_title": "設定"
+  },
+  "placeholders": {
+    "card_list": "カードリスト機能は現在準備中です。",
+    "deck_manager": "デッキ管理機能は現在準備中です。"
+  }
+}
