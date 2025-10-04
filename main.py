@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import Any, Optional
 
 from kivymd.app import MDApp
 from kivymd.uix.screenmanager import MDScreenManager
@@ -35,7 +36,7 @@ class _FallbackAppState:
         self.decks = []
         self.seasons = []
         self.match_records = []
-        self.current_match_settings = None
+        self.current_match_settings: Optional[dict[str, Any]] = None
         self.current_match_count = 0
 
 
