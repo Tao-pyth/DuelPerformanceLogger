@@ -3,6 +3,8 @@ from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.label import MDLabel
 from kivymd.uix.button import MDRaisedButton
 
+from function.resources import get_text
+
 
 class CardListScreen(MDScreen):
     """プレースホルダーのカードリスト画面."""
@@ -12,14 +14,14 @@ class CardListScreen(MDScreen):
         layout = MDBoxLayout(orientation="vertical", spacing=24, padding=(24, 24, 24, 24))
         layout.add_widget(
             MDLabel(
-                text="カードリスト機能は現在準備中です。",
+                text=get_text("placeholders.card_list"),
                 halign="center",
                 font_style="H5",
             )
         )
         layout.add_widget(
             MDRaisedButton(
-                text="メニューに戻る",
+                text=get_text("common.back_to_menu"),
                 pos_hint={"center_x": 0.5},
                 on_press=lambda *_: self._back_to_menu(),
             )

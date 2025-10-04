@@ -18,6 +18,8 @@ from kivy.core.text import LabelBase, DEFAULT_FONT
 from kivy.core.window import Window
 from kivymd.toast import toast
 
+from function.resources import get_text
+
 # 日本語フォント設定
 LabelBase.register(DEFAULT_FONT, r'resource\\theme\\font\\mgenplus-1c-regular.ttf')
 
@@ -63,7 +65,10 @@ def build_header(title, back_callback=None):
 
     # 戻るボタンが必要な場合は先頭に設置
     if back_callback is not None:
-        back_button = MDFlatButton(text="戻る", on_press=lambda *_: back_callback())
+        back_button = MDFlatButton(
+            text=get_text("common.back"),
+            on_press=lambda *_: back_callback(),
+        )
         back_button.size_hint_x = None
         header.add_widget(back_button)
 
@@ -87,7 +92,7 @@ class MenuScreen(MDScreen):
         root_layout = MDBoxLayout(orientation="vertical", spacing=0)
 
         # ヘッダーを追加し、アプリ名を常に表示
-        root_layout.add_widget(build_header("デュエルパフォーマンスログ"))
+        root_layout.add_widget(build_header(get_text("menu.title")))
 
         # メインコンテンツはスクロール可能にし、長い情報でも表示が崩れないようにする
         scroll_view = ScrollView()
@@ -105,7 +110,7 @@ class MenuScreen(MDScreen):
 
         content.add_widget(
             MDLabel(
-                text="バージョン 0.1.0",
+                text=get_text("common.version"),
                 halign="center",
                 theme_text_color="Hint",
                 size_hint_y=None,
@@ -130,7 +135,7 @@ class MenuScreen(MDScreen):
 
         card.add_widget(
             MDLabel(
-                text="デッキ分析ツールへようこそ",
+                text=get_text("menu.hero_title"),
                 font_style="H4",
                 theme_text_color="Custom",
                 text_color=(1, 1, 1, 1),
@@ -138,10 +143,7 @@ class MenuScreen(MDScreen):
         )
         card.add_widget(
             MDLabel(
-                text=(
-                    "試合結果とカード情報をまとめて管理し、\n"
-                    "デッキの改善ポイントを見つけましょう。"
-                ),
+                text=get_text("menu.hero_body"),
                 theme_text_color="Custom",
                 text_color=(1, 1, 1, 0.85),
             )
@@ -151,13 +153,13 @@ class MenuScreen(MDScreen):
         actions = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(48))
         actions.add_widget(
             MDRaisedButton(
-                text="試合を記録する",
+                text=get_text("menu.primary_action"),
                 on_press=lambda *_: self.change_screen("match_setup"),
             )
         )
         actions.add_widget(
             MDFlatButton(
-                text="統計を見る",
+                text=get_text("menu.secondary_action"),
                 theme_text_color="Custom",
                 text_color=(1, 1, 1, 1),
                 on_press=lambda *_: self.change_screen("stats"),
@@ -179,40 +181,40 @@ class MenuScreen(MDScreen):
         grid.add_widget(
             self._create_menu_option(
                 icon="cards",
-                title="使用デッキ情報登録",
-                description="対戦で使用するデッキの名称と説明を管理します。",
+                title=get_text("menu.options.deck_register.title"),
+                description=get_text("menu.options.deck_register.description"),
                 screen_name="deck_register",
             )
         )
         grid.add_widget(
             self._create_menu_option(
                 icon="calendar",
-                title="シーズン情報登録",
-                description="大会や期間の情報をまとめて記録します。",
+                title=get_text("menu.options.season_register.title"),
+                description=get_text("menu.options.season_register.description"),
                 screen_name="season_register",
             )
         )
         grid.add_widget(
             self._create_menu_option(
                 icon="clipboard-text",
-                title="対戦データ入力",
-                description="試合の初期情報を設定して記録を始めます。",
+                title=get_text("menu.options.match_setup.title"),
+                description=get_text("menu.options.match_setup.description"),
                 screen_name="match_setup",
             )
         )
         grid.add_widget(
             self._create_menu_option(
                 icon="chart-areaspline",
-                title="対戦結果統計",
-                description="条件で絞り込んだ勝率などの統計を確認します。",
+                title=get_text("menu.options.stats.title"),
+                description=get_text("menu.options.stats.description"),
                 screen_name="stats",
             )
         )
         grid.add_widget(
             self._create_menu_option(
                 icon="cog",
-                title="設定",
-                description="終了操作などの各種設定を行います。",
+                title=get_text("menu.options.settings.title"),
+                description=get_text("menu.options.settings.description"),
                 screen_name="settings",
             )
         )
@@ -255,7 +257,7 @@ class MenuScreen(MDScreen):
         button_row.add_widget(Widget())
         button_row.add_widget(
             MDRaisedButton(
-                text="開く",
+                text=get_text("common.open"),
                 on_press=lambda *_: self.change_screen(screen_name),
             )
         )
@@ -281,17 +283,17 @@ class DeckRegistrationScreen(BaseManagedScreen):
 
         # 入力欄の準備: デッキ名・説明・登録済み一覧
         self.name_field = MDTextField(
-            hint_text="デッキ名",
-            helper_text="必須項目です",
+            hint_text=get_text("deck_registration.name_hint"),
+            helper_text=get_text("common.required_helper"),
             helper_text_mode="on_focus",
         )
         self.description_field = MDTextField(
-            hint_text="デッキ説明",
+            hint_text=get_text("deck_registration.description_hint"),
             multiline=True,
             max_text_length=200,
         )
         self.deck_list_label = MDLabel(
-            text="登録済みデッキはありません",
+            text=get_text("deck_registration.empty_message"),
             theme_text_color="Hint",
         )
 
@@ -299,20 +301,27 @@ class DeckRegistrationScreen(BaseManagedScreen):
 
         # 画面タイトルと戻るボタンを持つヘッダー
         layout.add_widget(
-            build_header("使用デッキ情報登録", lambda: self.change_screen("menu"))
+            build_header(
+                get_text("deck_registration.header_title"),
+                lambda: self.change_screen("menu"),
+            )
         )
 
         # 入力フォームとアクションボタンを順に配置
         layout.add_widget(self.name_field)
         layout.add_widget(self.description_field)
         layout.add_widget(
-            MDRaisedButton(text="登録する", on_press=lambda *_: self.register_deck())
+            MDRaisedButton(
+                text=get_text("common.register"),
+                on_press=lambda *_: self.register_deck(),
+            )
         )
         layout.add_widget(self.deck_list_label)
 
         # メニュー画面へ戻るためのボタン
         back_button = MDFlatButton(
-            text="トップに戻る", on_press=lambda *_: self.change_screen("menu")
+            text=get_text("common.return_to_top"),
+            on_press=lambda *_: self.change_screen("menu"),
         )
         layout.add_widget(back_button)
 
@@ -324,18 +333,18 @@ class DeckRegistrationScreen(BaseManagedScreen):
         description = self.description_field.text.strip()
 
         if not name:
-            toast("デッキ名を入力してください")
+            toast(get_text("deck_registration.toast_missing_name"))
             return
 
         # 既存データとの重複チェック
         app = get_app_state()
         if any(deck["name"] == name for deck in app.decks):
-            toast("同じ名前のデッキが既に登録されています")
+            toast(get_text("deck_registration.toast_duplicate"))
             return
 
         # 問題がなければデータを追加し、入力欄を初期化
         app.decks.append({"name": name, "description": description})
-        toast("デッキを登録しました")
+        toast(get_text("deck_registration.toast_registered"))
         self.name_field.text = ""
         self.description_field.text = ""
         self.update_deck_list()
@@ -348,9 +357,13 @@ class DeckRegistrationScreen(BaseManagedScreen):
         # アプリ全体のデッキ情報を参照して表示を更新
         app = get_app_state()
         if not app.decks:
-            self.deck_list_label.text = "登録済みデッキはありません"
+            self.deck_list_label.text = get_text("deck_registration.empty_message")
         else:
-            lines = [f"• {deck['name']}: {deck['description'] or '説明なし'}" for deck in app.decks]
+            fallback_description = get_text("common.no_description")
+            lines = [
+                f"• {deck['name']}: {deck['description'] or fallback_description}"
+                for deck in app.decks
+            ]
             self.deck_list_label.text = "\n".join(lines)
 
 
@@ -360,33 +373,44 @@ class SeasonRegistrationScreen(BaseManagedScreen):
 
         # シーズン名入力欄を作成
         self.name_field = MDTextField(
-            hint_text="シーズン名",
-            helper_text="必須項目です",
+            hint_text=get_text("season_registration.name_hint"),
+            helper_text=get_text("common.required_helper"),
             helper_text_mode="on_focus",
         )
         # シーズンの説明文入力欄を作成
         self.description_field = MDTextField(
-            hint_text="シーズン説明",
+            hint_text=get_text("season_registration.description_hint"),
             multiline=True,
             max_text_length=200,
         )
         # 登録済みシーズンをまとめて表示するラベル
         self.season_list_label = MDLabel(
-            text="登録済みシーズンはありません",
+            text=get_text("season_registration.empty_message"),
             theme_text_color="Hint",
         )
 
         layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
         layout.add_widget(
-            build_header("シーズン情報登録", lambda: self.change_screen("menu"))
+            build_header(
+                get_text("season_registration.header_title"),
+                lambda: self.change_screen("menu"),
+            )
         )
         layout.add_widget(self.name_field)
         layout.add_widget(self.description_field)
         layout.add_widget(
-            MDRaisedButton(text="登録する", on_press=lambda *_: self.register_season())
+            MDRaisedButton(
+                text=get_text("common.register"),
+                on_press=lambda *_: self.register_season(),
+            )
         )
         layout.add_widget(self.season_list_label)
-        layout.add_widget(MDFlatButton(text="トップに戻る", on_press=lambda *_: self.change_screen("menu")))
+        layout.add_widget(
+            MDFlatButton(
+                text=get_text("common.return_to_top"),
+                on_press=lambda *_: self.change_screen("menu"),
+            )
+        )
 
         self.add_widget(layout)
 
@@ -396,18 +420,18 @@ class SeasonRegistrationScreen(BaseManagedScreen):
         description = self.description_field.text.strip()
 
         if not name:
-            toast("シーズン名を入力してください")
+            toast(get_text("season_registration.toast_missing_name"))
             return
 
         # 既存シーズンと名前が重ならないかチェック
         app = get_app_state()
         if any(season["name"] == name for season in app.seasons):
-            toast("同じ名前のシーズンが既に登録されています")
+            toast(get_text("season_registration.toast_duplicate"))
             return
 
         # 問題がなければ情報を保存し、表示を更新
         app.seasons.append({"name": name, "description": description})
-        toast("シーズンを登録しました")
+        toast(get_text("season_registration.toast_registered"))
         self.name_field.text = ""
         self.description_field.text = ""
         self.update_season_list()
@@ -420,9 +444,13 @@ class SeasonRegistrationScreen(BaseManagedScreen):
         # 保持しているシーズン情報を整形し、利用者へ提示
         app = get_app_state()
         if not app.seasons:
-            self.season_list_label.text = "登録済みシーズンはありません"
+            self.season_list_label.text = get_text("season_registration.empty_message")
         else:
-            lines = [f"• {season['name']}: {season['description'] or '説明なし'}" for season in app.seasons]
+            fallback_description = get_text("common.no_description")
+            lines = [
+                f"• {season['name']}: {season['description'] or fallback_description}"
+                for season in app.seasons
+            ]
             self.season_list_label.text = "\n".join(lines)
 
 
@@ -434,35 +462,49 @@ class MatchSetupScreen(BaseManagedScreen):
 
         # 対戦カウントとデッキ選択の入力部品を用意
         self.match_count_field = MDTextField(
-            hint_text="対戦カウント初期値",
+            hint_text=get_text("match_setup.count_hint"),
             input_filter="int",
             text="0",
         )
-        self.deck_button = MDRaisedButton(text="使用デッキを選択", on_press=lambda *_: self.open_deck_menu())
+        self.deck_button = MDRaisedButton(
+            text=get_text("match_setup.deck_button_default"),
+            on_press=lambda *_: self.open_deck_menu(),
+        )
 
         layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
         layout.add_widget(
-            build_header("対戦データ入力開始", lambda: self.change_screen("menu"))
+            build_header(
+                get_text("match_setup.header_title"),
+                lambda: self.change_screen("menu"),
+            )
         )
         layout.add_widget(self.match_count_field)
         layout.add_widget(self.deck_button)
         layout.add_widget(
-            MDRaisedButton(text="入力開始", on_press=lambda *_: self.start_entry())
+            MDRaisedButton(
+                text=get_text("match_setup.start_button"),
+                on_press=lambda *_: self.start_entry(),
+            )
         )
-        layout.add_widget(MDFlatButton(text="トップに戻る", on_press=lambda *_: self.change_screen("menu")))
+        layout.add_widget(
+            MDFlatButton(
+                text=get_text("common.return_to_top"),
+                on_press=lambda *_: self.change_screen("menu"),
+            )
+        )
 
         self.add_widget(layout)
 
     def on_pre_enter(self):
         # 画面に入るたびに選択状態をリセット
         self.selected_deck = None
-        self.deck_button.text = "使用デッキを選択"
+        self.deck_button.text = get_text("match_setup.deck_button_default")
 
     def open_deck_menu(self):
         # 登録済みデッキから選択肢を生成しドロップダウンで表示
         app = get_app_state()
         if not app.decks:
-            toast("まずはデッキを登録してください")
+            toast(get_text("match_setup.toast_no_decks"))
             return
 
         menu_items = [
@@ -483,20 +525,22 @@ class MatchSetupScreen(BaseManagedScreen):
 
     def set_selected_deck(self, name):
         self.selected_deck = name
-        self.deck_button.text = f"使用デッキ: {name}"
+        self.deck_button.text = get_text("match_setup.selected_deck_label").format(
+            deck_name=name
+        )
         if self.deck_menu:
             self.deck_menu.dismiss()
 
     def start_entry(self):
         if not self.selected_deck:
-            toast("使用デッキを選択してください")
+            toast(get_text("match_setup.toast_select_deck"))
             return
 
         # 入力値が整数として妥当かチェック
         try:
             initial_count = int(self.match_count_field.text or 0)
         except ValueError:
-            toast("対戦カウントには数字を入力してください")
+            toast(get_text("match_setup.toast_invalid_count"))
             return
 
         # 設定値をアプリ全体の状態として保持
@@ -507,7 +551,7 @@ class MatchSetupScreen(BaseManagedScreen):
         }
         app.current_match_count = initial_count
 
-        toast("対戦データ入力を開始します")
+        toast(get_text("match_setup.toast_start"))
         self.change_screen("match_entry")
 
 
@@ -519,28 +563,66 @@ class MatchEntryScreen(BaseManagedScreen):
         self.turn_buttons = []
         self.result_buttons = []
 
-        self.status_label = MDLabel(text="対戦データ入力を開始してください", halign="center")
-        self.opponent_field = MDTextField(hint_text="対戦相手使用デッキ")
+        self.status_label = MDLabel(
+            text=get_text("match_entry.status_default"),
+            halign="center",
+        )
+        self.opponent_field = MDTextField(
+            hint_text=get_text("match_entry.opponent_hint")
+        )
         self.keyword_field = MDTextField(
-            hint_text="キーワード (カンマ区切り)",
+            hint_text=get_text("match_entry.keyword_hint"),
             multiline=True,
         )
 
         layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
         layout.add_widget(
-            build_header("対戦データ入力", lambda: self.change_screen("match_setup"))
+            build_header(
+                get_text("match_entry.header_title"),
+                lambda: self.change_screen("match_setup"),
+            )
         )
         layout.add_widget(self.status_label)
-        layout.add_widget(MDLabel(text="先攻/後攻を選択", theme_text_color="Secondary"))
-        layout.add_widget(self._build_toggle_row(["先攻", "後攻"], self.set_turn_choice, "turn_buttons"))
+        layout.add_widget(
+            MDLabel(
+                text=get_text("match_entry.turn_prompt"),
+                theme_text_color="Secondary",
+            )
+        )
+        layout.add_widget(
+            self._build_toggle_row(
+                get_text("match_entry.turn_options"),
+                self.set_turn_choice,
+                "turn_buttons",
+            )
+        )
         layout.add_widget(self.opponent_field)
         layout.add_widget(self.keyword_field)
-        layout.add_widget(MDLabel(text="対戦結果を選択", theme_text_color="Secondary"))
-        layout.add_widget(self._build_toggle_row(["勝ち", "負け"], self.set_result_choice, "result_buttons"))
         layout.add_widget(
-            MDRaisedButton(text="結果を記録", on_press=lambda *_: self.submit_match())
+            MDLabel(
+                text=get_text("match_entry.result_prompt"),
+                theme_text_color="Secondary",
+            )
         )
-        layout.add_widget(MDFlatButton(text="開始画面に戻る", on_press=lambda *_: self.change_screen("match_setup")))
+        layout.add_widget(
+            self._build_toggle_row(
+                get_text("match_entry.result_options"),
+                self.set_result_choice,
+                "result_buttons",
+            )
+        )
+        layout.add_widget(
+            MDRaisedButton(
+                text=get_text("match_entry.record_button"),
+                on_press=lambda *_: self.submit_match(),
+            )
+        )
+        layout.add_widget(
+            MDFlatButton(
+                text=get_text("match_entry.back_button"),
+                on_press=lambda *_: self.change_screen("match_setup"),
+            )
+        )
 
         self.add_widget(layout)
 
@@ -589,12 +671,13 @@ class MatchEntryScreen(BaseManagedScreen):
         settings = getattr(app, "current_match_settings", None)
         if not settings:
             # 初期設定がなければ入力を促すメッセージを表示
-            self.status_label.text = "開始画面から初期情報を設定してください"
+            self.status_label.text = get_text("match_entry.status_missing_setup")
             return
 
         # 最新の対戦カウントと使用デッキをステータスに反映
-        self.status_label.text = (
-            f"対戦カウント: {app.current_match_count} / 使用デッキ: {settings['deck_name']}"
+        self.status_label.text = get_text("match_entry.status_summary").format(
+            count=app.current_match_count,
+            deck_name=settings["deck_name"],
         )
         self.reset_inputs()
 
@@ -612,16 +695,16 @@ class MatchEntryScreen(BaseManagedScreen):
         app = get_app_state()
         settings = getattr(app, "current_match_settings", None)
         if not settings:
-            toast("開始画面で初期情報を設定してください")
+            toast(get_text("match_entry.toast_missing_setup"))
             return
 
         # 必須選択がすべて揃っているか順番に確認
         if not self.turn_choice:
-            toast("先攻/後攻を選択してください")
+            toast(get_text("match_entry.toast_select_turn"))
             return
 
         if not self.result_choice:
-            toast("対戦結果を選択してください")
+            toast(get_text("match_entry.toast_select_result"))
             return
 
         # 入力内容を一つの辞書にまとめて保存
@@ -637,11 +720,12 @@ class MatchEntryScreen(BaseManagedScreen):
 
         # 試合数をカウントアップし、画面表示と入力欄を更新
         app.current_match_count += 1
-        self.status_label.text = (
-            f"対戦カウント: {app.current_match_count} / 使用デッキ: {settings['deck_name']}"
+        self.status_label.text = get_text("match_entry.status_summary").format(
+            count=app.current_match_count,
+            deck_name=settings["deck_name"],
         )
         self.reset_inputs()
-        toast("対戦結果を記録しました")
+        toast(get_text("match_entry.toast_recorded"))
 
     def reset_inputs(self):
         # トグルボタンとテキストフィールドを初期状態に戻す
@@ -661,26 +745,37 @@ class StatsScreen(BaseManagedScreen):
 
         # 統計情報を表示するラベルを初期化
         self.stats_label = MDLabel(
-            text="まだ統計を表示できるデータがありません",
+            text=get_text("stats.no_data"),
             theme_text_color="Secondary",
         )
 
         # 絞り込みに利用するボタンを準備
         self.filter_button = MDRaisedButton(
-            text="使用デッキで絞り込み",
+            text=get_text("stats.filter_button"),
             on_press=lambda *_: self.open_deck_menu(),
         )
 
         layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
         layout.add_widget(
-            build_header("対戦結果統計", lambda: self.change_screen("menu"))
+            build_header(
+                get_text("stats.header_title"),
+                lambda: self.change_screen("menu"),
+            )
         )
         layout.add_widget(self.filter_button)
         layout.add_widget(
-            MDFlatButton(text="絞り込み解除", on_press=lambda *_: self.clear_filter())
+            MDFlatButton(
+                text=get_text("common.clear_filter"),
+                on_press=lambda *_: self.clear_filter(),
+            )
         )
         layout.add_widget(self.stats_label)
-        layout.add_widget(MDFlatButton(text="トップに戻る", on_press=lambda *_: self.change_screen("menu")))
+        layout.add_widget(
+            MDFlatButton(
+                text=get_text("common.return_to_top"),
+                on_press=lambda *_: self.change_screen("menu"),
+            )
+        )
 
         self.add_widget(layout)
 
@@ -692,7 +787,7 @@ class StatsScreen(BaseManagedScreen):
         # 登録済みデッキから絞り込み候補を作成
         app = get_app_state()
         if not app.decks:
-            toast("デッキが登録されていません")
+            toast(get_text("stats.toast_no_decks"))
             return
 
         menu_items = [
@@ -716,13 +811,13 @@ class StatsScreen(BaseManagedScreen):
         self.selected_deck = name
         if self.deck_menu:
             self.deck_menu.dismiss()
-        self.filter_button.text = f"絞り込み: {name}"
+        self.filter_button.text = get_text("stats.filter_label").format(deck_name=name)
         self.update_stats()
 
     def clear_filter(self):
         # 条件を解除して全データを対象に戻す
         self.selected_deck = None
-        self.filter_button.text = "使用デッキで絞り込み"
+        self.filter_button.text = get_text("stats.filter_button")
         self.update_stats()
 
     def update_stats(self):
@@ -735,20 +830,29 @@ class StatsScreen(BaseManagedScreen):
         if not records:
             # 条件に合致するデータが無い場合のメッセージ
             if self.selected_deck:
-                self.stats_label.text = f"{self.selected_deck} のデータはまだありません"
+                self.stats_label.text = get_text("stats.no_data_for_deck").format(
+                    deck_name=self.selected_deck
+                )
             else:
-                self.stats_label.text = "まだ統計を表示できるデータがありません"
+                self.stats_label.text = get_text("stats.no_data")
             return
 
         total = len(records)
-        wins = sum(1 for r in records if r["result"] == "勝ち")
+        win_value, _ = get_text("match_entry.result_options")
+        wins = sum(1 for r in records if r["result"] == win_value)
         losses = total - wins
         win_rate = (wins / total) * 100
 
         # 集計結果を見やすい文字列にまとめてラベルへ反映
-        header = f"絞り込み: {self.selected_deck or 'すべてのデッキ'}"
-        self.stats_label.text = (
-            f"{header}\n対戦数: {total}\n勝利: {wins}\n敗北: {losses}\n勝率: {win_rate:.1f}%"
+        header = get_text("stats.filter_label").format(
+            deck_name=self.selected_deck or get_text("stats.filter_all")
+        )
+        self.stats_label.text = get_text("stats.summary_template").format(
+            header=header,
+            total=total,
+            wins=wins,
+            losses=losses,
+            win_rate=win_rate,
         )
 
 
@@ -757,10 +861,30 @@ class SettingsScreen(BaseManagedScreen):
         super().__init__(**kwargs)
         # 設定項目を縦方向に並べるレイアウト
         layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
-        layout.add_widget(build_header("設定", lambda: self.change_screen("menu")))
-        layout.add_widget(MDLabel(text="アプリケーション設定", theme_text_color="Secondary"))
-        layout.add_widget(MDRaisedButton(text="終了", on_press=lambda *_: self.exit_app()))
-        layout.add_widget(MDFlatButton(text="トップに戻る", on_press=lambda *_: self.change_screen("menu")))
+        layout.add_widget(
+            build_header(
+                get_text("settings.header_title"),
+                lambda: self.change_screen("menu"),
+            )
+        )
+        layout.add_widget(
+            MDLabel(
+                text=get_text("common.app_settings"),
+                theme_text_color="Secondary",
+            )
+        )
+        layout.add_widget(
+            MDRaisedButton(
+                text=get_text("common.exit"),
+                on_press=lambda *_: self.exit_app(),
+            )
+        )
+        layout.add_widget(
+            MDFlatButton(
+                text=get_text("common.return_to_top"),
+                on_press=lambda *_: self.change_screen("menu"),
+            )
+        )
         self.add_widget(layout)
 
     def exit_app(self):
