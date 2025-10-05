@@ -15,7 +15,10 @@
     "app_settings": "アプリケーション設定",
     "exit": "終了",
     "version": "バージョン 0.1.0",
-    "required_helper": "必須項目です"
+    "required_helper": "必須項目です",
+    "cancel": "キャンセル",
+    "execute": "実行",
+    "db_error": "データベース操作でエラーが発生しました"
   },
   "menu": {
     "title": "デュエルパフォーマンスログ",
@@ -91,7 +94,15 @@
     "toast_missing_setup": "開始画面で初期情報を設定してください",
     "toast_select_turn": "先攻/後攻を選択してください",
     "toast_select_result": "対戦結果を選択してください",
-    "toast_recorded": "対戦結果を記録しました"
+    "toast_recorded": "対戦結果を記録しました",
+    "clear_button": "入力内容をクリア",
+    "last_record_title": "直前の入力内容",
+    "last_record_empty": "まだ記録はありません",
+    "last_record_template": "対戦{match_no}: {turn} / 結果: {result}\n相手デッキ: {opponent}\nキーワード: {keywords}",
+    "last_record_no_keywords": "なし",
+    "last_record_no_opponent": "未入力",
+    "copy_last_button": "前回の情報を呼び出す",
+    "toast_copied_previous": "前回の情報を入力欄にコピーしました"
   },
   "stats": {
     "header_title": "対戦結果統計",
@@ -104,7 +115,13 @@
     "summary_template": "{header}\\n対戦数: {total}\\n勝利: {wins}\\n敗北: {losses}\\n勝率: {win_rate:.1f}%"
   },
   "settings": {
-    "header_title": "設定"
+    "header_title": "設定",
+    "db_section_title": "データ管理",
+    "db_init_description": "登録済みデータをすべて削除し、新しいデータベースを作成します。",
+    "db_init_button": "データベースを初期化",
+    "db_init_confirm": "データベースを初期化しますか？登録済みのデータは元に戻せません。",
+    "db_init_success": "データベースを初期化しました",
+    "db_init_failure": "データベースの初期化に失敗しました"
   },
   "placeholders": {
     "card_list": "カードリスト機能は現在準備中です。",
