@@ -1,9 +1,9 @@
 {
-  "ui": {
-    "mode": "normal"
-  },
   "database": {
     "expected_version": 2,
-    "last_backup": ""
+    "last_backup": "D:\\_user_template_\\Documents\\PG\\DuelPerformanceLogger\\resource\\theme\\backups\\20251005-140855"
+  },
+  "ui": {
+    "mode": "normal"
   }
 }
