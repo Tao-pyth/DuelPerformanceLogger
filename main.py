@@ -8,7 +8,13 @@ from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.gridlayout import MDGridLayout
 from kivymd.uix.card import MDCard
 from kivymd.uix.label import MDLabel, MDIcon
-from kivymd.uix.button import MDRaisedButton, MDFlatButton
+from kivymd.uix.button import (
+    MDRaisedButton,
+    MDFlatButton,
+    MDIconButton,
+    MDRectangleFlatButton,
+    MDRectangleFlatIconButton,
+)
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.list import OneLineListItem
@@ -41,6 +47,7 @@ class _FallbackAppState:
         self.current_match_settings: Optional[dict[str, Any]] = None
         self.current_match_count = 0
         self.db: Optional[DatabaseManager] = None
+        self.opponent_decks: list[str] = []
 
 
 _fallback_app_state = _FallbackAppState()
@@ -56,33 +63,42 @@ def get_app_state():
 
 
 def build_header(title, back_callback=None):
-    """アプリ画面上部のヘッダーを生成する補助関数."""
+    """アプリ画面上部のヘッダーを生成する共通ユーティリティ."""
 
-    # ヘッダー全体の横並びレイアウトを作成
+    # 画面上部に固定配置されるヘッダーレイアウト。
+    # 戻るボタン/タイトル/余白の 3 要素を横並びにし、
+    # どの画面でも UI 一貫性を保つようにしている。
     header = MDBoxLayout(
         orientation="horizontal",
         size_hint_y=None,
-        height=dp(56),
-        padding=(dp(8), dp(8), dp(8), dp(8)),
-        spacing=dp(8),
+        height=dp(64),
+        padding=(dp(12), dp(12), dp(12), dp(12)),
+        spacing=dp(12),
     )
 
-    # 戻るボタンが必要な場合は先頭に設置
     if back_callback is not None:
-        back_button = MDFlatButton(
+        # 左上に常に表示される戻るボタン。視認性向上のため背景色とアイコンを付与。
+        back_button = MDRectangleFlatIconButton(
             text=get_text("common.back"),
+            icon="arrow-left",
             on_press=lambda *_: back_callback(),
         )
-        back_button.size_hint_x = None
+        back_button.size_hint = (None, None)
+        back_button.height = dp(40)
+        back_button.md_bg_color = (0.93, 0.96, 0.98, 1)
+        back_button.text_color = (0.18, 0.36, 0.58, 1)
+        back_button.line_color = (0.18, 0.36, 0.58, 1)
         header.add_widget(back_button)
+    else:
+        # 戻るボタンなしでもタイトルが中央に来るようダミー領域を確保。
+        header.add_widget(Widget(size_hint_x=None, width=dp(48)))
 
-    # 画面タイトルを中央に配置
-    header_label = MDLabel(text=title, font_style="H6", halign="center")
+    header_label = MDLabel(text=title, font_style="H5", halign="center")
     header_label.size_hint_x = 1
     header.add_widget(header_label)
 
-    # タイトルを中央に寄せるための余白ウィジェットを末尾に追加
-    header.add_widget(Widget())
+    # タイトルを正確に中央揃えにするため末尾にも余白を確保。
+    header.add_widget(Widget(size_hint_x=None, width=dp(48)))
 
     return header
 
@@ -296,10 +312,22 @@ class DeckRegistrationScreen(BaseManagedScreen):
             multiline=True,
             max_text_length=200,
         )
-        self.deck_list_label = MDLabel(
+        # 登録済みデッキ表示用のコンテナ（スクロール対応）
+        self.deck_empty_label = MDLabel(
             text=get_text("deck_registration.empty_message"),
             theme_text_color="Hint",
+            size_hint_y=None,
+            height=dp(24),
         )
+        self.deck_list_container = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(8),
+            padding=(0, 0, 0, dp(8)),
+            size_hint_y=None,
+        )
+        self.deck_list_container.bind(minimum_height=self.deck_list_container.setter("height"))
+        self.deck_scroll = ScrollView(size_hint=(1, 1))
+        self.deck_scroll.add_widget(self.deck_list_container)
 
         layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
 
@@ -320,13 +348,16 @@ class DeckRegistrationScreen(BaseManagedScreen):
                 on_press=lambda *_: self.register_deck(),
             )
         )
-        layout.add_widget(self.deck_list_label)
+        layout.add_widget(self.deck_empty_label)
+        layout.add_widget(self.deck_scroll)
 
         # メニュー画面へ戻るためのボタン
         back_button = MDFlatButton(
             text=get_text("common.return_to_top"),
             on_press=lambda *_: self.change_screen("menu"),
         )
+        back_button.size_hint_y = None
+        back_button.height = dp(48)
         layout.add_widget(back_button)
 
         self.add_widget(layout)
@@ -372,15 +403,76 @@ class DeckRegistrationScreen(BaseManagedScreen):
         db = getattr(app, "db", None)
         if db is not None:
             app.decks = db.fetch_decks()
+        self.deck_list_container.clear_widgets()
+
         if not app.decks:
-            self.deck_list_label.text = get_text("deck_registration.empty_message")
+            self.deck_empty_label.height = dp(24)
+            self.deck_empty_label.opacity = 1
+            self.deck_scroll.opacity = 0
+            self.deck_scroll.size_hint_y = None
+            self.deck_scroll.height = dp(0)
         else:
-            fallback_description = get_text("common.no_description")
-            lines = [
-                f"• {deck['name']}: {deck['description'] or fallback_description}"
-                for deck in app.decks
-            ]
-            self.deck_list_label.text = "\n".join(lines)
+            self.deck_empty_label.height = dp(0)
+            self.deck_empty_label.opacity = 0
+            self.deck_scroll.opacity = 1
+            self.deck_scroll.size_hint_y = 1
+            for deck in app.decks:
+                self.deck_list_container.add_widget(self._create_deck_card(deck))
+
+    def _create_deck_card(self, deck: dict[str, str]):
+        """登録済みデッキ 1 件分の情報をカード形式で描画する."""
+
+        fallback_description = get_text("common.no_description")
+        card = MDCard(
+            orientation="horizontal",
+            padding=(dp(16), dp(12), dp(12), dp(12)),
+            size_hint=(1, None),
+            height=dp(84),
+            radius=[16, 16, 16, 16],
+        )
+
+        text_box = MDBoxLayout(orientation="vertical", spacing=dp(4))
+        text_box.add_widget(
+            MDLabel(text=deck["name"], font_style="Subtitle1", shorten=True)
+        )
+        text_box.add_widget(
+            MDLabel(
+                text=deck["description"] or fallback_description,
+                theme_text_color="Secondary",
+                shorten=True,
+            )
+        )
+
+        card.add_widget(text_box)
+        card.add_widget(Widget())
+
+        delete_button = MDIconButton(
+            icon="delete", on_release=lambda *_: self.delete_deck(deck["name"])
+        )
+        delete_button.theme_text_color = "Custom"
+        delete_button.text_color = (0.86, 0.16, 0.16, 1)
+        card.add_widget(delete_button)
+
+        return card
+
+    def delete_deck(self, name: str):
+        """指定デッキを削除し一覧を再描画する."""
+
+        app = get_app_state()
+        db = getattr(app, "db", None)
+        if db is None:
+            toast(get_text("common.db_error"))
+            return
+
+        try:
+            db.delete_deck(name)
+        except DatabaseError:
+            toast(get_text("common.db_error"))
+            return
+
+        app.decks = db.fetch_decks()
+        toast(get_text("deck_registration.toast_deleted"))
+        self.update_deck_list()
 
 
 class SeasonRegistrationScreen(BaseManagedScreen):
@@ -400,10 +492,21 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             max_text_length=200,
         )
         # 登録済みシーズンをまとめて表示するラベル
-        self.season_list_label = MDLabel(
+        self.season_empty_label = MDLabel(
             text=get_text("season_registration.empty_message"),
             theme_text_color="Hint",
+            size_hint_y=None,
+            height=dp(24),
         )
+        self.season_list_container = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(8),
+            padding=(0, 0, 0, dp(8)),
+            size_hint_y=None,
+        )
+        self.season_list_container.bind(minimum_height=self.season_list_container.setter("height"))
+        self.season_scroll = ScrollView(size_hint=(1, 1))
+        self.season_scroll.add_widget(self.season_list_container)
 
         layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
         layout.add_widget(
@@ -420,13 +523,15 @@ class SeasonRegistrationScreen(BaseManagedScreen):
                 on_press=lambda *_: self.register_season(),
             )
         )
-        layout.add_widget(self.season_list_label)
-        layout.add_widget(
-            MDFlatButton(
-                text=get_text("common.return_to_top"),
-                on_press=lambda *_: self.change_screen("menu"),
-            )
+        layout.add_widget(self.season_empty_label)
+        layout.add_widget(self.season_scroll)
+        back_button = MDFlatButton(
+            text=get_text("common.return_to_top"),
+            on_press=lambda *_: self.change_screen("menu"),
         )
+        back_button.size_hint_y = None
+        back_button.height = dp(48)
+        layout.add_widget(back_button)
 
         self.add_widget(layout)
 
@@ -470,15 +575,76 @@ class SeasonRegistrationScreen(BaseManagedScreen):
         db = getattr(app, "db", None)
         if db is not None:
             app.seasons = db.fetch_seasons()
+        self.season_list_container.clear_widgets()
+
         if not app.seasons:
-            self.season_list_label.text = get_text("season_registration.empty_message")
+            self.season_empty_label.height = dp(24)
+            self.season_empty_label.opacity = 1
+            self.season_scroll.opacity = 0
+            self.season_scroll.size_hint_y = None
+            self.season_scroll.height = dp(0)
         else:
-            fallback_description = get_text("common.no_description")
-            lines = [
-                f"• {season['name']}: {season['description'] or fallback_description}"
-                for season in app.seasons
-            ]
-            self.season_list_label.text = "\n".join(lines)
+            self.season_empty_label.height = dp(0)
+            self.season_empty_label.opacity = 0
+            self.season_scroll.opacity = 1
+            self.season_scroll.size_hint_y = 1
+            for season in app.seasons:
+                self.season_list_container.add_widget(self._create_season_card(season))
+
+    def _create_season_card(self, season: dict[str, str]):
+        """シーズン情報 1 件を表示するカードを生成する."""
+
+        fallback_description = get_text("common.no_description")
+        card = MDCard(
+            orientation="horizontal",
+            padding=(dp(16), dp(12), dp(12), dp(12)),
+            size_hint=(1, None),
+            height=dp(84),
+            radius=[16, 16, 16, 16],
+        )
+
+        text_box = MDBoxLayout(orientation="vertical", spacing=dp(4))
+        text_box.add_widget(
+            MDLabel(text=season["name"], font_style="Subtitle1", shorten=True)
+        )
+        text_box.add_widget(
+            MDLabel(
+                text=season["description"] or fallback_description,
+                theme_text_color="Secondary",
+                shorten=True,
+            )
+        )
+
+        card.add_widget(text_box)
+        card.add_widget(Widget())
+
+        delete_button = MDIconButton(
+            icon="delete", on_release=lambda *_: self.delete_season(season["name"])
+        )
+        delete_button.theme_text_color = "Custom"
+        delete_button.text_color = (0.86, 0.16, 0.16, 1)
+        card.add_widget(delete_button)
+
+        return card
+
+    def delete_season(self, name: str):
+        """指定シーズンを削除し、一覧を更新する."""
+
+        app = get_app_state()
+        db = getattr(app, "db", None)
+        if db is None:
+            toast(get_text("common.db_error"))
+            return
+
+        try:
+            db.delete_season(name)
+        except DatabaseError:
+            toast(get_text("common.db_error"))
+            return
+
+        app.seasons = db.fetch_seasons()
+        toast(get_text("season_registration.toast_deleted"))
+        self.update_season_list()
 
 
 class MatchSetupScreen(BaseManagedScreen):
@@ -505,7 +671,24 @@ class MatchSetupScreen(BaseManagedScreen):
                 lambda: self.change_screen("menu"),
             )
         )
+        # ラベルを追加し、入力項目の意味を明確にする
+        layout.add_widget(
+            MDLabel(
+                text=get_text("match_setup.count_label"),
+                font_style="Subtitle1",
+                size_hint_y=None,
+                height=dp(28),
+            )
+        )
         layout.add_widget(self.match_count_field)
+        layout.add_widget(
+            MDLabel(
+                text=get_text("match_setup.deck_label"),
+                font_style="Subtitle1",
+                size_hint_y=None,
+                height=dp(28),
+            )
+        )
         layout.add_widget(self.deck_button)
         layout.add_widget(
             MDRaisedButton(
@@ -607,11 +790,19 @@ class MatchEntryScreen(BaseManagedScreen):
         self.status_label = MDLabel(
             text=get_text("match_entry.status_default"),
             halign="center",
+            font_style="H5",
         )
-        
+
         self.opponent_field = MDTextField(
-            hint_text=get_text("match_entry.opponent_hint")
+            hint_text=get_text("match_entry.opponent_hint"),
         )
+        self.opponent_menu_button = MDIconButton(
+            icon="chevron-down",
+            on_release=lambda *_: self.open_opponent_menu(),
+        )
+        self.opponent_menu_button.theme_text_color = "Custom"
+        self.opponent_menu_button.text_color = (0.18, 0.36, 0.58, 1)
+        self.opponent_menu = None
         self.keyword_field = MDTextField(
             hint_text=get_text("match_entry.keyword_hint"),
             multiline=True,
@@ -644,7 +835,20 @@ class MatchEntryScreen(BaseManagedScreen):
                 "turn_buttons",
             )
         )
-        content.add_widget(self.opponent_field)
+        # 対戦相手デッキ名の入力欄とプルダウンボタンを横並びに配置
+        opponent_row = MDBoxLayout(
+            orientation="horizontal",
+            spacing=dp(8),
+            size_hint_y=None,
+            height=dp(72),
+        )
+        self.opponent_field.size_hint_y = None
+        self.opponent_field.height = dp(72)
+        opponent_row.add_widget(self.opponent_field)
+        self.opponent_menu_button.size_hint = (None, None)
+        self.opponent_menu_button.height = dp(48)
+        opponent_row.add_widget(self.opponent_menu_button)
+        content.add_widget(opponent_row)
         content.add_widget(self.keyword_field)
         content.add_widget(
             MDLabel(
@@ -660,29 +864,35 @@ class MatchEntryScreen(BaseManagedScreen):
             )
         )
 
-        quick_actions = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(40))
+        # 下部操作ボタンは横一列にまとめて操作感を統一
+        quick_actions = MDBoxLayout(
+            spacing=dp(12), size_hint_y=None, height=dp(48)
+        )
         clear_button = MDFlatButton(
             text=get_text("match_entry.clear_button"),
             on_press=lambda *_: self.reset_inputs(focus_opponent=True),
         )
-        clear_button.size_hint = (None, None)
-        clear_button.height = dp(40)
-        quick_actions.add_widget(clear_button)
-        quick_actions.add_widget(Widget())
-        content.add_widget(quick_actions)
+        clear_button.size_hint = (1, None)
+        clear_button.height = dp(48)
 
-        content.add_widget(
-            MDRaisedButton(
-                text=get_text("match_entry.record_button"),
-                on_press=lambda *_: self.submit_match(),
-            )
+        record_button = MDRaisedButton(
+            text=get_text("match_entry.record_button"),
+            on_press=lambda *_: self.submit_match(),
         )
-        content.add_widget(
-            MDFlatButton(
-                text=get_text("match_entry.back_button"),
-                on_press=lambda *_: self.change_screen("match_setup"),
-            )
+        record_button.size_hint = (1, None)
+        record_button.height = dp(48)
+
+        back_button = MDFlatButton(
+            text=get_text("match_entry.back_button"),
+            on_press=lambda *_: self.change_screen("match_setup"),
         )
+        back_button.size_hint = (1, None)
+        back_button.height = dp(48)
+
+        quick_actions.add_widget(clear_button)
+        quick_actions.add_widget(record_button)
+        quick_actions.add_widget(back_button)
+        content.add_widget(quick_actions)
 
         scroll_view.add_widget(content)
         root_layout.add_widget(scroll_view)
@@ -775,18 +985,20 @@ class MatchEntryScreen(BaseManagedScreen):
     def _build_toggle_row(self, options, callback, attr_name):
         """指定した選択肢をトグル可能なボタン行として構築する."""
 
-        row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(40))
+        row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(48))
         buttons = []
 
         app = get_app_state()
         primary_color = getattr(app.theme_cls, "primary_color", (0.2, 0.6, 0.86, 1))
+        neutral_line = (0.7, 0.7, 0.7, 1)
 
         for option in options:
-            button = MDFlatButton(text=option, theme_text_color="Custom")
-            button.size_hint_y = None
-            button.height = dp(40)
-            button.md_bg_color = (0, 0, 0, 0)
+            button = MDRectangleFlatButton(text=option)
+            button.size_hint = (1, None)
+            button.height = dp(48)
+            button.md_bg_color = (1, 1, 1, 1)
             button.text_color = primary_color
+            button.line_color = neutral_line
 
             def make_callback(value):
                 return lambda *_: callback(value)
@@ -800,21 +1012,96 @@ class MatchEntryScreen(BaseManagedScreen):
 
         return row
 
+    def refresh_opponent_menu(self):
+        """対戦相手デッキ名のドロップダウン候補を再構築する."""
+
+        if self.opponent_menu:
+            self.opponent_menu.dismiss()
+            self.opponent_menu = None
+
+        app = get_app_state()
+        options = getattr(app, "opponent_decks", []) or []
+
+        menu_items = []
+        for option in options:
+            menu_items.append(
+                {
+                    "viewclass": "OneLineListItem",
+                    "text": option,
+                    "on_release": lambda value=option: self.set_opponent_from_menu(value),
+                }
+            )
+
+        if not options:
+            menu_items.append(
+                {
+                    "viewclass": "OneLineListItem",
+                    "text": get_text("match_entry.opponent_menu_empty"),
+                    "disabled": True,
+                    "on_release": lambda *_: None,
+                }
+            )
+
+        menu_items.append(
+            {
+                "viewclass": "OneLineListItem",
+                "text": get_text("match_entry.opponent_manual_entry"),
+                "on_release": lambda *_: self._manual_input_opponent(),
+            }
+        )
+
+        self.opponent_menu = MDDropdownMenu(
+            caller=self.opponent_menu_button,
+            items=menu_items,
+            width_mult=4,
+        )
+
+    def open_opponent_menu(self):
+        """プルダウンメニューを開く。必要に応じて再生成する。"""
+
+        if self.opponent_menu is None:
+            self.refresh_opponent_menu()
+        if self.opponent_menu:
+            self.opponent_menu.caller = self.opponent_menu_button
+            self.opponent_menu.open()
+
+    def _dismiss_opponent_menu(self):
+        if self.opponent_menu:
+            self.opponent_menu.dismiss()
+
+    def set_opponent_from_menu(self, value: str):
+        """メニューで選択されたデッキ名を入力欄へ反映する."""
+
+        self.opponent_field.text = value
+        self._dismiss_opponent_menu()
+
+    def _manual_input_opponent(self):
+        """手入力に切り替えるメニュー項目の処理."""
+
+        self._dismiss_opponent_menu()
+        self.opponent_field.focus = True
+        self.opponent_field.text = ""
+
     def _update_toggle_style(self, buttons, selected_value):
         app = get_app_state()
         primary = getattr(app.theme_cls, "primary_color", (0.2, 0.6, 0.86, 1))
+        highlight = (0.86, 0.16, 0.16, 1)
+        neutral_line = (0.7, 0.7, 0.7, 1)
 
         for button in buttons:
             if button.text == selected_value:
-                button.md_bg_color = primary
-                button.text_color = (1, 1, 1, 1)
+                button.line_color = highlight
+                button.text_color = highlight
+                button.md_bg_color = (1, 0.93, 0.93, 1)
             else:
-                button.md_bg_color = (0, 0, 0, 0)
+                button.line_color = neutral_line
                 button.text_color = primary
+                button.md_bg_color = (1, 1, 1, 1)
 
     def on_pre_enter(self):
         app = get_app_state()
         settings = getattr(app, "current_match_settings", None)
+        self.refresh_opponent_menu()
         if not settings:
             # 初期設定がなければ入力を促すメッセージを表示
             self.status_label.text = get_text("match_entry.status_missing_setup")
@@ -881,6 +1168,8 @@ class MatchEntryScreen(BaseManagedScreen):
             return
 
         app.match_records = db.fetch_matches()
+        app.opponent_decks = db.fetch_opponent_decks()
+        self.refresh_opponent_menu()
 
         # 試合数をカウントアップし、画面表示と入力欄を更新
         app.current_match_count += 1
@@ -899,6 +1188,7 @@ class MatchEntryScreen(BaseManagedScreen):
         self.result_choice = None
         self._update_toggle_style(self.turn_buttons, None)
         self._update_toggle_style(self.result_buttons, None)
+        self._dismiss_opponent_menu()
         self.opponent_field.text = ""
         self.keyword_field.text = ""
         if focus_opponent:
@@ -1132,12 +1422,14 @@ class SettingsScreen(BaseManagedScreen):
             app.match_records = []
             app.current_match_settings = None
             app.current_match_count = 0
+            app.opponent_decks = []
             _fallback_app_state.db = db
             _fallback_app_state.decks = []
             _fallback_app_state.seasons = []
             _fallback_app_state.match_records = []
             _fallback_app_state.current_match_settings = None
             _fallback_app_state.current_match_count = 0
+            _fallback_app_state.opponent_decks = []
         except Exception:  # pragma: no cover - defensive
             toast(get_text("settings.db_init_failure"))
             return
@@ -1160,6 +1452,7 @@ class DeckAnalyzerApp(MDApp):
         self.decks = self.db.fetch_decks()
         self.seasons = self.db.fetch_seasons()
         self.match_records = self.db.fetch_matches()
+        self.opponent_decks = self.db.fetch_opponent_decks()
         self.current_match_settings = None
         self.current_match_count = 0
 
@@ -1169,6 +1462,7 @@ class DeckAnalyzerApp(MDApp):
         _fallback_app_state.decks = list(self.decks)
         _fallback_app_state.seasons = list(self.seasons)
         _fallback_app_state.match_records = list(self.match_records)
+        _fallback_app_state.opponent_decks = list(self.opponent_decks)
         sm = MDScreenManager()
         sm.add_widget(MenuScreen(name="menu"))
         sm.add_widget(DeckRegistrationScreen(name="deck_register"))
