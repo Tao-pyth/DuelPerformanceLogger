@@ -7,6 +7,7 @@ from typing import Any, Optional
 from kivymd.app import MDApp
 from kivymd.uix.screenmanager import MDScreenManager
 from kivymd.uix.screen import MDScreen
+from kivymd.uix.anchorlayout import MDAnchorLayout
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.gridlayout import MDGridLayout
 from kivymd.uix.card import MDCard
@@ -33,6 +34,7 @@ from kivymd.uix.dialog import MDDialog
 from function.resources import get_text
 from function.config import load_config, save_config, get_config_path
 from function import DatabaseManager, DatabaseError, DuplicateEntryError
+from function.logger import log_error
 
 # 日本語フォント設定
 _FONT_PATH = Path(__file__).resolve().parent / "resource" / "theme" / "font" / "mgenplus-1c-regular.ttf"
@@ -71,6 +73,12 @@ def get_app_state():
     if app is None:
         return _fallback_app_state
     return app
+
+
+def log_db_error(context: str, exc: Exception | None = None, **info) -> None:
+    """Persist database error details to the log folder."""
+
+    log_error(context, exc, **info)
 
 
 def build_header(title, back_callback=None, top_callback=None):
@@ -139,6 +147,53 @@ def build_header(title, back_callback=None, top_callback=None):
     header.add_widget(right_spacer)
 
     return header
+
+
+def _normalize_turn_options():
+    raw = get_text("match_entry.turn_options")
+    options: list[tuple[str, bool]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                label = str(item.get("label", ""))
+                value = item.get("value")
+                if label:
+                    options.append((label, bool(value)))
+            else:
+                label = str(item)
+                value = True if not options else False
+                options.append((label, value))
+    if not options:
+        options = [("先攻", True), ("後攻", False)]
+    return options
+
+
+def _normalize_result_options():
+    raw = get_text("match_entry.result_options")
+    options: list[tuple[str, int]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                label = str(item.get("label", ""))
+                value = item.get("value")
+                if label:
+                    try:
+                        options.append((label, int(value)))
+                    except (TypeError, ValueError):
+                        continue
+            else:
+                label = str(item)
+                mapped = 1 if not options else -1
+                options.append((label, mapped))
+    if not options:
+        options = [("勝ち", 1), ("引き分け", 0), ("負け", -1)]
+    return options
+
+
+TURN_OPTIONS = _normalize_turn_options()
+TURN_VALUE_TO_LABEL = {value: label for label, value in TURN_OPTIONS}
+RESULT_OPTIONS = _normalize_result_options()
+RESULT_VALUE_TO_LABEL = {value: label for label, value in RESULT_OPTIONS}
 
 
 def _parse_schedule_datetime(date_text: str | None, time_text: str | None) -> Optional[datetime]:
@@ -295,7 +350,7 @@ class MenuScreen(MDScreen):
                 icon="calendar",
                 title=get_text("menu.options.season_register.title"),
                 description=get_text("menu.options.season_register.description"),
-                screen_name="season_register",
+                screen_name="season_list",
             )
         )
         grid.add_widget(
@@ -375,6 +430,39 @@ class MenuScreen(MDScreen):
             self.manager.current = screen_name
 
 class BaseManagedScreen(MDScreen):
+    def _create_scaffold(
+        self,
+        title: str,
+        back_callback=None,
+        top_callback=None,
+        *,
+        action_anchor_x: str = "center",
+    ):
+        root = MDBoxLayout(orientation="vertical")
+
+        title_anchor = MDAnchorLayout(
+            size_hint_y=1, anchor_x="center", anchor_y="center"
+        )
+        header = build_header(title, back_callback, top_callback)
+        header.size_hint_y = None
+        header.height = dp(64)
+        header.size_hint_x = 0.95
+        title_anchor.add_widget(header)
+
+        content_anchor = MDAnchorLayout(
+            size_hint_y=8, anchor_x="center", anchor_y="center"
+        )
+        action_anchor = MDAnchorLayout(
+            size_hint_y=1, anchor_x=action_anchor_x, anchor_y="center"
+        )
+
+        root.add_widget(title_anchor)
+        root.add_widget(content_anchor)
+        root.add_widget(action_anchor)
+
+        self.add_widget(root)
+        return root, content_anchor, action_anchor
+
     def change_screen(self, screen_name):
         # 指定された画面名へ遷移する共通処理
         if self.manager:
@@ -413,30 +501,32 @@ class DeckRegistrationScreen(BaseManagedScreen):
         self.deck_scroll = ScrollView(size_hint=(1, 1))
         self.deck_scroll.add_widget(self.deck_list_container)
 
-        layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
-
-        # 画面タイトルと戻るボタンを持つヘッダー
-        layout.add_widget(
-            build_header(
-                get_text("deck_registration.header_title"),
-                lambda: self.change_screen("menu"),
-                lambda: self.change_screen("menu"),
-            )
+        self.root_layout, content_anchor, action_anchor = self._create_scaffold(
+            get_text("deck_registration.header_title"),
+            lambda: self.change_screen("menu"),
+            lambda: self.change_screen("menu"),
         )
 
-        # 入力フォームとアクションボタンを順に配置
-        layout.add_widget(self.name_field)
-        layout.add_widget(self.description_field)
-        layout.add_widget(
-            MDRaisedButton(
-                text=get_text("common.register"),
-                on_press=lambda *_: self.register_deck(),
-            )
+        content_box = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(16),
+            padding=(dp(24), dp(24), dp(24), dp(24)),
+            size_hint=(0.95, 0.95),
         )
-        layout.add_widget(self.deck_empty_label)
-        layout.add_widget(self.deck_scroll)
+        content_box.add_widget(self.name_field)
+        content_box.add_widget(self.description_field)
+        content_box.add_widget(self.deck_empty_label)
+        content_box.add_widget(self.deck_scroll)
+        content_anchor.add_widget(content_box)
 
-        self.add_widget(layout)
+        register_button = MDRaisedButton(
+            text=get_text("common.register"),
+            on_press=lambda *_: self.register_deck(),
+        )
+        register_button.size_hint = (None, None)
+        register_button.height = dp(48)
+        register_button.width = dp(220)
+        action_anchor.add_widget(register_button)
 
     def register_deck(self):
         # 入力値を取得し、空欄がないか確認
@@ -459,7 +549,8 @@ class DeckRegistrationScreen(BaseManagedScreen):
         except DuplicateEntryError:
             toast(get_text("deck_registration.toast_duplicate"))
             return
-        except DatabaseError:
+        except DatabaseError as exc:
+            log_db_error("Failed to add deck", exc, name=name)
             toast(get_text("common.db_error"))
             return
 
@@ -542,7 +633,8 @@ class DeckRegistrationScreen(BaseManagedScreen):
 
         try:
             db.delete_deck(name)
-        except DatabaseError:
+        except DatabaseError as exc:
+            log_db_error("Failed to delete deck", exc, name=name)
             toast(get_text("common.db_error"))
             return
 
@@ -551,35 +643,10 @@ class DeckRegistrationScreen(BaseManagedScreen):
         self.update_deck_list()
 
 
-class SeasonRegistrationScreen(BaseManagedScreen):
+class SeasonListScreen(BaseManagedScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        # シーズン名入力欄を作成
-        self.name_field = MDTextField(
-            hint_text=get_text("season_registration.name_hint"),
-            helper_text=get_text("common.required_helper"),
-            helper_text_mode="on_focus",
-        )
-        # シーズンの説明文入力欄を作成
-        self.description_field = MDTextField(
-            hint_text=get_text("season_registration.description_hint"),
-            multiline=True,
-            max_text_length=200,
-        )
-        self.start_date_field = MDTextField(
-            hint_text=get_text("season_registration.start_date_hint"),
-        )
-        self.start_time_field = MDTextField(
-            hint_text=get_text("season_registration.start_time_hint"),
-        )
-        self.end_date_field = MDTextField(
-            hint_text=get_text("season_registration.end_date_hint"),
-        )
-        self.end_time_field = MDTextField(
-            hint_text=get_text("season_registration.end_time_hint"),
-        )
-        # 登録済みシーズンをまとめて表示するラベル
         self.season_empty_label = MDLabel(
             text=get_text("season_registration.empty_message"),
             theme_text_color="Hint",
@@ -592,107 +659,46 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             padding=(0, 0, 0, dp(8)),
             size_hint_y=None,
         )
-        self.season_list_container.bind(minimum_height=self.season_list_container.setter("height"))
-        self.season_scroll = ScrollView(size_hint=(1, 1))
+        self.season_list_container.bind(
+            minimum_height=self.season_list_container.setter("height")
+        )
+        self.season_scroll = ScrollView(size_hint=(0.95, 0.95))
         self.season_scroll.add_widget(self.season_list_container)
 
-        layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
-        layout.add_widget(
-            build_header(
-                get_text("season_registration.header_title"),
-                lambda: self.change_screen("menu"),
-                lambda: self.change_screen("menu"),
-            )
-        )
-        layout.add_widget(self.name_field)
-        layout.add_widget(self.description_field)
-        layout.add_widget(
-            MDLabel(
-                text=get_text("season_registration.schedule_section_title"),
-                theme_text_color="Secondary",
-            )
+        (
+            self.root_layout,
+            content_anchor,
+            action_anchor,
+        ) = self._create_scaffold(
+            get_text("season_registration.list_header_title"),
+            lambda: self.change_screen("menu"),
+            lambda: self.change_screen("menu"),
+            action_anchor_x="right",
         )
 
-        schedule_box = MDBoxLayout(orientation="vertical", spacing=dp(12))
-
-        start_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(72))
-        for field in (self.start_date_field, self.start_time_field):
-            field.size_hint = (1, None)
-            field.height = dp(72)
-            start_row.add_widget(field)
-        schedule_box.add_widget(start_row)
-
-        end_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(72))
-        for field in (self.end_date_field, self.end_time_field):
-            field.size_hint = (1, None)
-            field.height = dp(72)
-            end_row.add_widget(field)
-        schedule_box.add_widget(end_row)
-
-        layout.add_widget(schedule_box)
-        layout.add_widget(
-            MDRaisedButton(
-                text=get_text("common.register"),
-                on_press=lambda *_: self.register_season(),
-            )
+        content_box = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(16),
+            padding=(dp(24), dp(24), dp(24), dp(24)),
+            size_hint=(0.95, 0.95),
         )
-        layout.add_widget(self.season_empty_label)
-        layout.add_widget(self.season_scroll)
+        content_box.add_widget(self.season_empty_label)
+        content_box.add_widget(self.season_scroll)
+        content_anchor.add_widget(content_box)
 
-        self.add_widget(layout)
-
-    def register_season(self):
-        # 入力内容を取得し、必須項目の確認を行う
-        name = self.name_field.text.strip()
-        description = self.description_field.text.strip()
-
-        if not name:
-            toast(get_text("season_registration.toast_missing_name"))
-            return
-
-        app = get_app_state()
-        db = getattr(app, "db", None)
-        if db is None:
-            toast(get_text("common.db_error"))
-            return
-
-        start_date = self.start_date_field.text.strip() or None
-        start_time = self.start_time_field.text.strip() or None
-        end_date = self.end_date_field.text.strip() or None
-        end_time = self.end_time_field.text.strip() or None
-
-        try:
-            db.add_season(
-                name,
-                description,
-                start_date=start_date,
-                start_time=start_time,
-                end_date=end_date,
-                end_time=end_time,
-            )
-        except DuplicateEntryError:
-            toast(get_text("season_registration.toast_duplicate"))
-            return
-        except DatabaseError:
-            toast(get_text("common.db_error"))
-            return
-
-        app.seasons = db.fetch_seasons()
-        toast(get_text("season_registration.toast_registered"))
-        self.name_field.text = ""
-        self.description_field.text = ""
-        self.start_date_field.text = ""
-        self.start_time_field.text = ""
-        self.end_date_field.text = ""
-        self.end_time_field.text = ""
-        self.update_season_list()
+        add_button = MDRaisedButton(
+            text=get_text("season_registration.add_button"),
+            on_press=lambda *_: self.change_screen("season_register"),
+        )
+        add_button.size_hint = (None, None)
+        add_button.height = dp(48)
+        add_button.width = dp(260)
+        action_anchor.add_widget(add_button)
 
     def on_pre_enter(self):
-        # 表示直前に登録リストを最新状態へ
         self.update_season_list()
 
     def update_season_list(self):
-        # 保持しているシーズン情報を整形し、利用者へ提示
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is not None:
@@ -710,12 +716,13 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             self.season_empty_label.opacity = 0
             self.season_scroll.opacity = 1
             self.season_scroll.size_hint_y = 1
+            self.season_scroll.height = 0
             for season in app.seasons:
-                self.season_list_container.add_widget(self._create_season_card(season))
+                self.season_list_container.add_widget(
+                    self._create_season_card(season)
+                )
 
     def _create_season_card(self, season: dict[str, object]):
-        """シーズン情報 1 件を表示するカードを生成する."""
-
         fallback_description = get_text("common.no_description")
         card = MDCard(
             orientation="vertical",
@@ -780,7 +787,9 @@ class SeasonRegistrationScreen(BaseManagedScreen):
                 days = _days_until(start_dt)
                 if days > 0:
                     lines.append(
-                        get_text("season_registration.schedule_starts_in").format(days=days)
+                        get_text("season_registration.schedule_starts_in").format(
+                            days=days
+                        )
                     )
             elif end_dt and end_dt > now:
                 lines.append(get_text("season_registration.schedule_running"))
@@ -797,7 +806,9 @@ class SeasonRegistrationScreen(BaseManagedScreen):
                 days = _days_until(end_dt)
                 if days > 0:
                     lines.append(
-                        get_text("season_registration.schedule_ends_in").format(days=days)
+                        get_text("season_registration.schedule_ends_in").format(
+                            days=days
+                        )
                     )
             else:
                 lines.append(get_text("season_registration.schedule_finished"))
@@ -805,8 +816,6 @@ class SeasonRegistrationScreen(BaseManagedScreen):
         return lines
 
     def delete_season(self, name: str):
-        """指定シーズンを削除し、一覧を更新する."""
-
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is None:
@@ -815,13 +824,160 @@ class SeasonRegistrationScreen(BaseManagedScreen):
 
         try:
             db.delete_season(name)
-        except DatabaseError:
+        except DatabaseError as exc:
+            log_db_error("Failed to delete season", exc, name=name)
             toast(get_text("common.db_error"))
             return
 
         app.seasons = db.fetch_seasons()
         toast(get_text("season_registration.toast_deleted"))
         self.update_season_list()
+
+
+class SeasonRegistrationScreen(BaseManagedScreen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # シーズン名入力欄を作成
+        self.name_field = MDTextField(
+            hint_text=get_text("season_registration.name_hint"),
+            helper_text=get_text("common.required_helper"),
+            helper_text_mode="on_focus",
+        )
+        # シーズンの説明文入力欄を作成
+        self.description_field = MDTextField(
+            hint_text=get_text("season_registration.description_hint"),
+            multiline=True,
+            max_text_length=200,
+        )
+        self.start_date_field = MDTextField(
+            hint_text=get_text("season_registration.start_date_hint"),
+        )
+        self.start_time_field = MDTextField(
+            hint_text=get_text("season_registration.start_time_hint"),
+        )
+        self.end_date_field = MDTextField(
+            hint_text=get_text("season_registration.end_date_hint"),
+        )
+        self.end_time_field = MDTextField(
+            hint_text=get_text("season_registration.end_time_hint"),
+        )
+        (
+            self.root_layout,
+            content_anchor,
+            action_anchor,
+        ) = self._create_scaffold(
+            get_text("season_registration.header_title"),
+            lambda: self.change_screen("season_list"),
+            lambda: self.change_screen("menu"),
+        )
+
+        content_box = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(16),
+            padding=(dp(24), dp(24), dp(24), dp(24)),
+            size_hint=(0.95, 0.95),
+        )
+        content_box.add_widget(self.name_field)
+        content_box.add_widget(self.description_field)
+        content_box.add_widget(
+            MDLabel(
+                text=get_text("season_registration.schedule_section_title"),
+                theme_text_color="Secondary",
+            )
+        )
+
+        schedule_box = MDBoxLayout(orientation="vertical", spacing=dp(12))
+
+        start_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(72))
+        for field in (self.start_date_field, self.start_time_field):
+            field.size_hint = (1, None)
+            field.height = dp(72)
+            start_row.add_widget(field)
+        schedule_box.add_widget(start_row)
+
+        end_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(72))
+        for field in (self.end_date_field, self.end_time_field):
+            field.size_hint = (1, None)
+            field.height = dp(72)
+            end_row.add_widget(field)
+        schedule_box.add_widget(end_row)
+
+        content_box.add_widget(schedule_box)
+        content_anchor.add_widget(content_box)
+
+        actions = MDBoxLayout(
+            orientation="horizontal",
+            spacing=dp(16),
+            size_hint=(0.6, None),
+            height=dp(48),
+        )
+        register_button = MDRaisedButton(
+            text=get_text("common.register"),
+            on_press=lambda *_: self.register_season(),
+        )
+        register_button.size_hint = (1, None)
+        register_button.height = dp(48)
+        back_button = MDFlatButton(
+            text=get_text("season_registration.back_to_list"),
+            on_press=lambda *_: self.change_screen("season_list"),
+        )
+        back_button.size_hint = (1, None)
+        back_button.height = dp(48)
+        actions.add_widget(back_button)
+        actions.add_widget(register_button)
+        action_anchor.add_widget(actions)
+        self.reset_form()
+
+    def register_season(self):
+        # 入力内容を取得し、必須項目の確認を行う
+        name = self.name_field.text.strip()
+        description = self.description_field.text.strip()
+
+        if not name:
+            toast(get_text("season_registration.toast_missing_name"))
+            return
+
+        app = get_app_state()
+        db = getattr(app, "db", None)
+        if db is None:
+            toast(get_text("common.db_error"))
+            return
+
+        start_date = self.start_date_field.text.strip() or None
+        start_time = self.start_time_field.text.strip() or None
+        end_date = self.end_date_field.text.strip() or None
+        end_time = self.end_time_field.text.strip() or None
+
+        try:
+            db.add_season(
+                name,
+                description,
+                start_date=start_date,
+                start_time=start_time,
+                end_date=end_date,
+                end_time=end_time,
+            )
+        except DuplicateEntryError:
+            toast(get_text("season_registration.toast_duplicate"))
+            return
+        except DatabaseError as exc:
+            log_db_error("Failed to add season", exc, name=name)
+            toast(get_text("common.db_error"))
+            return
+
+        app.seasons = db.fetch_seasons()
+        toast(get_text("season_registration.toast_registered"))
+        self.reset_form()
+        self.change_screen("season_list")
+
+    def reset_form(self):
+        self.name_field.text = ""
+        self.description_field.text = ""
+        self.start_date_field.text = ""
+        self.start_time_field.text = ""
+        self.end_date_field.text = ""
+        self.end_time_field.text = ""
 
 
 class MatchSetupScreen(BaseManagedScreen):
@@ -841,40 +997,50 @@ class MatchSetupScreen(BaseManagedScreen):
             on_press=lambda *_: self.open_deck_menu(),
         )
 
-        layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
-        layout.add_widget(
-            build_header(
-                get_text("match_setup.header_title"),
-                lambda: self.change_screen("menu"),
-                lambda: self.change_screen("menu"),
-            )
+        (
+            self.root_layout,
+            content_anchor,
+            action_anchor,
+        ) = self._create_scaffold(
+            get_text("match_setup.header_title"),
+            lambda: self.change_screen("menu"),
+            lambda: self.change_screen("menu"),
         )
-        # ラベルを追加し、入力項目の意味を明確にする
-        layout.add_widget(
+
+        content_box = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(16),
+            padding=(dp(24), dp(24), dp(24), dp(24)),
+            size_hint=(0.95, 0.95),
+        )
+        content_box.add_widget(
             MDLabel(
                 text=get_text("match_setup.count_label"),
                 font_style="Subtitle1",
-                size_hint_y=None,
-                height=dp(28),
             )
         )
-        layout.add_widget(self.match_count_field)
-        layout.add_widget(
+        self.match_count_field.size_hint = (1, None)
+        self.match_count_field.height = dp(72)
+        content_box.add_widget(self.match_count_field)
+        content_box.add_widget(
             MDLabel(
                 text=get_text("match_setup.deck_label"),
                 font_style="Subtitle1",
-                size_hint_y=None,
-                height=dp(28),
             )
         )
-        layout.add_widget(self.deck_button)
-        layout.add_widget(
-            MDRaisedButton(
-                text=get_text("match_setup.start_button"),
-                on_press=lambda *_: self.start_entry(),
-            )
+        self.deck_button.size_hint = (1, None)
+        self.deck_button.height = dp(48)
+        content_box.add_widget(self.deck_button)
+        content_anchor.add_widget(content_box)
+
+        start_button = MDRaisedButton(
+            text=get_text("match_setup.start_button"),
+            on_press=lambda *_: self.start_entry(),
         )
-        self.add_widget(layout)
+        start_button.size_hint = (None, None)
+        start_button.height = dp(48)
+        start_button.width = dp(220)
+        action_anchor.add_widget(start_button)
 
     def on_pre_enter(self):
         # 画面に入るたびに選択状態をリセット
@@ -944,17 +1110,22 @@ class MatchSetupScreen(BaseManagedScreen):
         self.change_screen("match_entry")
 
 
+
 class MatchEntryScreen(BaseManagedScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.turn_choice = None
-        self.result_choice = None
-        self.turn_buttons = []
-        self.result_buttons = []
+        self.turn_choice: Optional[bool] = None
+        self.result_choice: Optional[int] = None
+        self.turn_buttons: list[MDRectangleFlatButton] = []
+        self.result_buttons: list[MDRectangleFlatButton] = []
         self.last_record_data = None
         self._clock_event = None
 
-        header = build_header(
+        (
+            self.normal_root,
+            normal_content_anchor,
+            normal_action_anchor,
+        ) = self._create_scaffold(
             get_text("match_entry.header_title"),
             lambda: self.change_screen("match_setup"),
             lambda: self.change_screen("menu"),
@@ -981,42 +1152,53 @@ class MatchEntryScreen(BaseManagedScreen):
         )
         self.opponent_menu_button.theme_text_color = "Custom"
         self.opponent_menu_button.text_color = (0.18, 0.36, 0.58, 1)
+        self.opponent_menu_button.size_hint = (None, None)
+        self.opponent_menu_button.height = dp(48)
         self.opponent_menu = None
+
         self.keyword_field = MDTextField(
             hint_text=get_text("match_entry.keyword_hint"),
             multiline=True,
         )
+        self.keyword_field.size_hint = (1, None)
+        self.keyword_field.height = dp(72)
 
-        root_layout = MDBoxLayout(orientation="vertical")
-        root_layout.add_widget(header)
-
-        scroll_view = ScrollView()
-        content = MDBoxLayout(
+        self.normal_scroll = ScrollView(size_hint=(0.95, 0.95))
+        self.normal_content = MDBoxLayout(
             orientation="vertical",
-            padding=(dp(24), dp(24), dp(24), dp(24)),
             spacing=dp(16),
+            padding=(dp(24), dp(24), dp(24), dp(24)),
             size_hint_y=None,
         )
-        content.bind(minimum_height=content.setter("height"))
+        self.normal_content.bind(minimum_height=self.normal_content.setter("height"))
+        self.normal_scroll.add_widget(self.normal_content)
+        normal_content_anchor.add_widget(self.normal_scroll)
 
-        content.add_widget(self.clock_label)
-        content.add_widget(self.status_label)
-        content.add_widget(self._build_last_record_card())
-        content.add_widget(
-            MDLabel(
-                text=get_text("match_entry.turn_prompt"),
-                theme_text_color="Secondary",
-            )
+        self.last_record_card = self._build_last_record_card()
+
+        self.turn_prompt_label = MDLabel(
+            text=get_text("match_entry.turn_prompt"),
+            theme_text_color="Secondary",
         )
-        content.add_widget(
-            self._build_toggle_row(
-                get_text("match_entry.turn_options"),
-                self.set_turn_choice,
-                "turn_buttons",
-            )
+        self.result_prompt_label = MDLabel(
+            text=get_text("match_entry.result_prompt"),
+            theme_text_color="Secondary",
         )
-        # 対戦相手デッキ名の入力欄とプルダウンボタンを横並びに配置
-        opponent_row = MDBoxLayout(
+
+        self.turn_container_normal = MDBoxLayout(
+            orientation="horizontal",
+            spacing=dp(12),
+            size_hint_y=None,
+            height=dp(48),
+        )
+        self._populate_toggle_buttons(
+            self.turn_container_normal,
+            TURN_OPTIONS,
+            self.turn_buttons,
+            self.set_turn_choice,
+        )
+
+        self.opponent_row = MDBoxLayout(
             orientation="horizontal",
             spacing=dp(8),
             size_hint_y=None,
@@ -1024,75 +1206,80 @@ class MatchEntryScreen(BaseManagedScreen):
         )
         self.opponent_field.size_hint_y = None
         self.opponent_field.height = dp(72)
-        opponent_row.add_widget(self.opponent_field)
-        self.opponent_menu_button.size_hint = (None, None)
-        self.opponent_menu_button.height = dp(48)
-        opponent_row.add_widget(self.opponent_menu_button)
-        content.add_widget(opponent_row)
-        content.add_widget(self.keyword_field)
-        content.add_widget(
-            MDLabel(
-                text=get_text("match_entry.result_prompt"),
-                theme_text_color="Secondary",
-            )
+        self.opponent_row.add_widget(self.opponent_field)
+        self.opponent_row.add_widget(self.opponent_menu_button)
+
+        self.opponent_section = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(8),
+            size_hint_y=None,
         )
-        content.add_widget(
-            self._build_toggle_row(
-                get_text("match_entry.result_options"),
-                self.set_result_choice,
-                "result_buttons",
-            )
+        self.opponent_section.bind(
+            minimum_height=self.opponent_section.setter("height")
+        )
+        self.opponent_section.add_widget(self.opponent_row)
+        self.opponent_section.add_widget(self.keyword_field)
+
+        self.result_container_normal = MDBoxLayout(
+            orientation="horizontal",
+            spacing=dp(12),
+            size_hint_y=None,
+            height=dp(48),
+        )
+        self._populate_toggle_buttons(
+            self.result_container_normal,
+            RESULT_OPTIONS,
+            self.result_buttons,
+            self.set_result_choice,
         )
 
-        # 下部操作ボタンは横一列にまとめて操作感を統一
-        quick_actions = MDBoxLayout(
-            spacing=dp(12), size_hint_y=None, height=dp(48)
+        self.normal_content_widgets = [
+            self.clock_label,
+            self.status_label,
+            self.last_record_card,
+            self.turn_prompt_label,
+            self.turn_container_normal,
+            self.opponent_section,
+            self.result_prompt_label,
+            self.result_container_normal,
+        ]
+        for widget in self.normal_content_widgets:
+            self.normal_content.add_widget(widget)
+
+        self.quick_actions = MDBoxLayout(
+            orientation="horizontal",
+            spacing=dp(12),
+            size_hint=(0.85, None),
+            height=dp(48),
         )
-        clear_button = MDFlatButton(
+        self.clear_button = MDFlatButton(
             text=get_text("match_entry.clear_button"),
             on_press=lambda *_: self.reset_inputs(focus_opponent=True),
         )
-        clear_button.size_hint = (1, None)
-        clear_button.height = dp(48)
-
-        record_button = MDRaisedButton(
+        self.record_button = MDRaisedButton(
             text=get_text("match_entry.record_button"),
             on_press=lambda *_: self.submit_match(),
         )
-        record_button.size_hint = (1, None)
-        record_button.height = dp(48)
-
-        back_button = MDFlatButton(
+        self.back_button = MDFlatButton(
             text=get_text("match_entry.back_button"),
             on_press=lambda *_: self.change_screen("match_setup"),
         )
-        back_button.size_hint = (1, None)
-        back_button.height = dp(48)
+        for button in (self.clear_button, self.record_button, self.back_button):
+            button.size_hint = (1, None)
+            button.height = dp(48)
+        self.quick_actions.add_widget(self.clear_button)
+        self.quick_actions.add_widget(self.record_button)
+        self.quick_actions.add_widget(self.back_button)
+        normal_action_anchor.add_widget(self.quick_actions)
+        self.quick_action_buttons = [
+            self.clear_button,
+            self.record_button,
+            self.back_button,
+        ]
 
-        quick_actions.add_widget(clear_button)
-        quick_actions.add_widget(record_button)
-        quick_actions.add_widget(back_button)
-        content.add_widget(quick_actions)
-
-        scroll_view.add_widget(content)
-        root_layout.add_widget(scroll_view)
-
-        self.root_layout = root_layout
-        self.content_layout = content
-        self.scroll_view = scroll_view
-        self.opponent_row = opponent_row
-        self.quick_actions = quick_actions
-        self.quick_action_buttons = [clear_button, record_button, back_button]
-        self.default_padding = tuple(content.padding)
-        self.default_spacing = content.spacing
-        self.compact_padding = (dp(16), dp(12), dp(16), dp(12))
-        self.compact_spacing = dp(8)
-        self.default_opponent_height = opponent_row.height
-        self.compact_opponent_height = dp(56)
-        self.default_quick_height = quick_actions.height
-        self.compact_quick_height = dp(40)
-
-        self.add_widget(root_layout)
+        self.broadcast_layout = self._build_broadcast_layout()
+        self._update_toggle_style(self.turn_buttons, None)
+        self._update_toggle_style(self.result_buttons, None)
 
     def _build_last_record_card(self):
         """Create a summary card showing the latest saved match."""
@@ -1132,6 +1319,136 @@ class MatchEntryScreen(BaseManagedScreen):
 
         return card
 
+    def _populate_toggle_buttons(
+        self,
+        container: MDBoxLayout,
+        options: list[tuple[str, object]],
+        collection: list[MDRectangleFlatButton],
+        callback,
+    ) -> None:
+        app = get_app_state()
+        primary_color = getattr(app.theme_cls, "primary_color", (0.2, 0.6, 0.86, 1))
+        neutral_line = (0.7, 0.7, 0.7, 1)
+
+        for label, value in options:
+            button = MDRectangleFlatButton(text=label)
+            button.size_hint = (1, None)
+            button.height = dp(48)
+            button.md_bg_color = (1, 1, 1, 1)
+            button.text_color = primary_color
+            button.line_color = neutral_line
+            button._toggle_value = value
+
+            def make_callback(choice):
+                return lambda *_: callback(choice)
+
+            button.bind(on_release=make_callback(value))
+            container.add_widget(button)
+            collection.append(button)
+
+    def _ensure_normal_content_order(self) -> None:
+        for widget in self.normal_content_widgets:
+            self._remove_from_parent(widget)
+        for widget in self.normal_content_widgets:
+            self.normal_content.add_widget(widget)
+
+    def _build_broadcast_layout(self) -> MDBoxLayout:
+        layout = MDBoxLayout(
+            orientation="horizontal",
+            spacing=dp(12),
+            padding=(dp(12), dp(12), dp(12), dp(12)),
+        )
+
+        self.broadcast_nav_section = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=1,
+        )
+        for icon, callback in (
+            ("home", lambda *_: self.change_screen("menu")),
+            ("arrow-left", lambda *_: self.change_screen("match_setup")),
+        ):
+            button = MDIconButton(icon=icon, on_release=callback)
+            button.theme_text_color = "Custom"
+            button.text_color = (0.18, 0.36, 0.58, 1)
+            button.size_hint = (None, None)
+            button.height = dp(48)
+            button.width = dp(48)
+            self.broadcast_nav_section.add_widget(button)
+        layout.add_widget(self.broadcast_nav_section)
+
+        self.broadcast_time_section = MDAnchorLayout(
+            size_hint_x=4, anchor_x="center", anchor_y="center"
+        )
+        self.broadcast_clock_label = MDLabel(
+            text=self._get_current_time_text(),
+            halign="center",
+            font_style="H3",
+        )
+        self.broadcast_time_section.add_widget(self.broadcast_clock_label)
+        layout.add_widget(self.broadcast_time_section)
+
+        self.turn_container_broadcast = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=1,
+        )
+        self._populate_toggle_buttons(
+            self.turn_container_broadcast,
+            TURN_OPTIONS,
+            self.turn_buttons,
+            self.set_turn_choice,
+        )
+        layout.add_widget(self.turn_container_broadcast)
+
+        self.broadcast_deck_section = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=1,
+        )
+        self.broadcast_status_label = MDLabel(
+            text=get_text("match_entry.status_default"),
+            halign="center",
+            font_style="Subtitle1",
+        )
+        self.broadcast_deck_section.add_widget(self.broadcast_status_label)
+        layout.add_widget(self.broadcast_deck_section)
+
+        self.result_container_broadcast = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=1,
+        )
+        self._populate_toggle_buttons(
+            self.result_container_broadcast,
+            RESULT_OPTIONS,
+            self.result_buttons,
+            self.set_result_choice,
+        )
+        layout.add_widget(self.result_container_broadcast)
+
+        self.broadcast_actions_section = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=1,
+        )
+        layout.add_widget(self.broadcast_actions_section)
+
+        self.broadcast_record_section = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=1,
+        )
+        layout.add_widget(self.broadcast_record_section)
+
+        return layout
+
+    @staticmethod
+    def _remove_from_parent(widget):
+        parent = widget.parent
+        if parent is not None:
+            parent.remove_widget(widget)
+
     def _load_last_record(self):
         """Fetch and display the most recent record for the selected deck."""
 
@@ -1155,12 +1472,27 @@ class MatchEntryScreen(BaseManagedScreen):
 
         self.last_record_data = last_record
         keywords = last_record.get("keywords") or []
-        keywords_text = ", ".join(keywords) if keywords else get_text("match_entry.last_record_no_keywords")
-        opponent_text = last_record.get("opponent_deck") or get_text("match_entry.last_record_no_opponent")
-        self.last_record_label.text = get_text("match_entry.last_record_template").format(
+        keywords_text = (
+            ", ".join(keywords)
+            if keywords
+            else get_text("match_entry.last_record_no_keywords")
+        )
+        opponent_text = (
+            last_record.get("opponent_deck")
+            or get_text("match_entry.last_record_no_opponent")
+        )
+        turn_value = bool(last_record.get("turn"))
+        result_value = int(last_record.get("result"))
+        turn_label = TURN_VALUE_TO_LABEL.get(turn_value, str(last_record.get("turn")))
+        result_label = RESULT_VALUE_TO_LABEL.get(
+            result_value, str(last_record.get("result"))
+        )
+        self.last_record_label.text = get_text(
+            "match_entry.last_record_template"
+        ).format(
             match_no=last_record.get("match_no"),
-            turn=last_record.get("turn"),
-            result=last_record.get("result"),
+            turn=turn_label,
+            result=result_label,
             opponent=opponent_text,
             keywords=keywords_text,
         )
@@ -1176,36 +1508,6 @@ class MatchEntryScreen(BaseManagedScreen):
         keywords = self.last_record_data.get("keywords") or []
         self.keyword_field.text = ", ".join(keywords)
         toast(get_text("match_entry.toast_copied_previous"))
-
-    def _build_toggle_row(self, options, callback, attr_name):
-        """指定した選択肢をトグル可能なボタン行として構築する."""
-
-        row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(48))
-        buttons = []
-
-        app = get_app_state()
-        primary_color = getattr(app.theme_cls, "primary_color", (0.2, 0.6, 0.86, 1))
-        neutral_line = (0.7, 0.7, 0.7, 1)
-
-        for option in options:
-            button = MDRectangleFlatButton(text=option)
-            button.size_hint = (1, None)
-            button.height = dp(48)
-            button.md_bg_color = (1, 1, 1, 1)
-            button.text_color = primary_color
-            button.line_color = neutral_line
-
-            def make_callback(value):
-                return lambda *_: callback(value)
-
-            button.bind(on_release=make_callback(option))
-            row.add_widget(button)
-            buttons.append(button)
-
-        setattr(self, attr_name, buttons)
-        self._update_toggle_style(buttons, None)
-
-        return row
 
     def refresh_opponent_menu(self):
         """対戦相手デッキ名のドロップダウン候補を再構築する."""
@@ -1284,7 +1586,8 @@ class MatchEntryScreen(BaseManagedScreen):
         neutral_line = (0.7, 0.7, 0.7, 1)
 
         for button in buttons:
-            if button.text == selected_value:
+            value = getattr(button, "_toggle_value", None)
+            if value == selected_value:
                 button.line_color = highlight
                 button.text_color = highlight
                 button.md_bg_color = (1, 0.93, 0.93, 1)
@@ -1295,60 +1598,66 @@ class MatchEntryScreen(BaseManagedScreen):
 
     def _apply_mode_layout(self, mode: str) -> None:
         if mode == "broadcast":
-            self.content_layout.padding = self.compact_padding
-            self.content_layout.spacing = self.compact_spacing
-            self.quick_actions.height = self.compact_quick_height
-            for button in self.quick_action_buttons:
-                button.height = self.compact_quick_height
-            self.opponent_row.height = self.compact_opponent_height
-            self.opponent_field.height = self.compact_opponent_height
-            self.status_label.font_style = "Subtitle1"
+            self._show_broadcast_layout()
         else:
-            self.content_layout.padding = self.default_padding
-            self.content_layout.spacing = self.default_spacing
-            self.quick_actions.height = self.default_quick_height
-            for button in self.quick_action_buttons:
-                button.height = self.default_quick_height
-            self.opponent_row.height = self.default_opponent_height
-            self.opponent_field.height = self.default_opponent_height
-            self.status_label.font_style = "H5"
+            self._show_normal_layout()
 
-    def _sync_window_size(self, mode: str) -> None:
-        app = get_app_state()
-        if mode == "broadcast":
-            if not getattr(app, "default_window_size", None):
-                app.default_window_size = Window.size
-            Window.size = (1080, 280)
-        else:
-            default_size = getattr(app, "default_window_size", None)
-            if default_size:
-                Window.size = default_size
+    def _show_broadcast_layout(self) -> None:
+        if self.normal_root.parent:
+            self.remove_widget(self.normal_root)
+        if not self.broadcast_layout.parent:
+            self.add_widget(self.broadcast_layout)
 
-    def on_pre_enter(self):
-        self._start_clock()
-        app = get_app_state()
-        mode = getattr(app, "ui_mode", "normal")
-        self._apply_mode_layout(mode)
-        self._sync_window_size(mode)
-        settings = getattr(app, "current_match_settings", None)
-        self.refresh_opponent_menu()
-        if not settings:
-            # 初期設定がなければ入力を促すメッセージを表示
-            self.status_label.text = get_text("match_entry.status_missing_setup")
-            self.last_record_data = None
-            if hasattr(self, "last_record_label"):
-                self.last_record_label.text = get_text("match_entry.last_record_empty")
-            if hasattr(self, "copy_last_button"):
-                self.copy_last_button.disabled = True
-            return
+        self.broadcast_deck_section.clear_widgets()
+        self.broadcast_deck_section.add_widget(self.broadcast_status_label)
+        self._remove_from_parent(self.opponent_section)
+        self.broadcast_deck_section.add_widget(self.opponent_section)
 
-        # 最新の対戦カウントと使用デッキをステータスに反映
-        self.status_label.text = get_text("match_entry.status_summary").format(
-            count=app.current_match_count,
-            deck_name=settings["deck_name"],
+        self.broadcast_actions_section.clear_widgets()
+        for button in (self.clear_button, self.back_button):
+            self._remove_from_parent(button)
+            button.size_hint = (1, None)
+            button.height = dp(48)
+            self.broadcast_actions_section.add_widget(button)
+
+        self.broadcast_record_section.clear_widgets()
+        self._remove_from_parent(self.record_button)
+        self.record_button.size_hint = (1, None)
+        self.record_button.height = dp(48)
+        self.broadcast_record_section.add_widget(self.record_button)
+
+    def _show_normal_layout(self) -> None:
+        if self.broadcast_layout.parent:
+            self.remove_widget(self.broadcast_layout)
+        if not self.normal_root.parent:
+            self.add_widget(self.normal_root)
+
+        self._remove_from_parent(self.opponent_section)
+        self._ensure_normal_content_order()
+
+        self.broadcast_actions_section.clear_widgets()
+        self.broadcast_record_section.clear_widgets()
+
+        self.quick_actions.clear_widgets()
+        for button in (self.clear_button, self.record_button, self.back_button):
+            self._remove_from_parent(button)
+            button.size_hint = (1, None)
+            button.height = dp(48)
+            self.quick_actions.add_widget(button)
+
+    def _update_status_summary(self, count: int, deck_name: str) -> None:
+        summary = get_text("match_entry.status_summary").format(
+            count=count,
+            deck_name=deck_name,
         )
-        self.reset_inputs(focus_opponent=True)
-        self._load_last_record()
+        self.status_label.text = summary
+        if hasattr(self, "broadcast_status_label"):
+            self.broadcast_status_label.text = summary
+
+    def _set_status_message(self, message: str) -> None:
+        self.status_label.text = message
+        if hasattr(self, "broadcast_status_label"):
+            self.broadcast_status_label.text = message
 
     def set_turn_choice(self, choice):
         # 選択されたボタンのみアクティブ状態にする
@@ -1367,16 +1676,14 @@ class MatchEntryScreen(BaseManagedScreen):
             toast(get_text("match_entry.toast_missing_setup"))
             return
 
-        # 必須選択がすべて揃っているか順番に確認
-        if not self.turn_choice:
+        if self.turn_choice is None:
             toast(get_text("match_entry.toast_select_turn"))
             return
 
-        if not self.result_choice:
+        if self.result_choice is None:
             toast(get_text("match_entry.toast_select_result"))
             return
 
-        # 入力内容を一つの辞書にまとめて保存
         db = getattr(app, "db", None)
         if db is None:
             toast(get_text("common.db_error"))
@@ -1387,13 +1694,18 @@ class MatchEntryScreen(BaseManagedScreen):
             "deck_name": settings["deck_name"],
             "turn": self.turn_choice,
             "opponent_deck": self.opponent_field.text.strip(),
-            "keywords": [kw.strip() for kw in self.keyword_field.text.split(",") if kw.strip()],
+            "keywords": [
+                kw.strip()
+                for kw in self.keyword_field.text.split(",")
+                if kw.strip()
+            ],
             "result": self.result_choice,
         }
 
         try:
             db.record_match(record)
-        except DatabaseError:
+        except DatabaseError as exc:
+            log_db_error("Failed to record match", exc, record=record)
             toast(get_text("common.db_error"))
             return
 
@@ -1401,13 +1713,9 @@ class MatchEntryScreen(BaseManagedScreen):
         app.opponent_decks = db.fetch_opponent_decks()
         self.refresh_opponent_menu()
 
-        # 試合数をカウントアップし、画面表示と入力欄を更新
         app.current_match_count += 1
         settings["count"] = app.current_match_count
-        self.status_label.text = get_text("match_entry.status_summary").format(
-            count=app.current_match_count,
-            deck_name=settings["deck_name"],
-        )
+        self._update_status_summary(app.current_match_count, settings["deck_name"])
         self.reset_inputs(focus_opponent=True)
         self._load_last_record()
         toast(get_text("match_entry.toast_recorded"))
@@ -1424,6 +1732,28 @@ class MatchEntryScreen(BaseManagedScreen):
         if focus_opponent:
             self.opponent_field.focus = True
 
+    def on_pre_enter(self):
+        self._start_clock()
+        app = get_app_state()
+        mode = getattr(app, "ui_mode", "normal")
+        self._apply_mode_layout(mode)
+        self._sync_window_size(mode)
+        settings = getattr(app, "current_match_settings", None)
+        self.refresh_opponent_menu()
+        if not settings:
+            message = get_text("match_entry.status_missing_setup")
+            self._set_status_message(message)
+            self.last_record_data = None
+            if hasattr(self, "last_record_label"):
+                self.last_record_label.text = get_text("match_entry.last_record_empty")
+            if hasattr(self, "copy_last_button"):
+                self.copy_last_button.disabled = True
+            return
+
+        self._update_status_summary(app.current_match_count, settings["deck_name"])
+        self.reset_inputs(focus_opponent=True)
+        self._load_last_record()
+
     def on_leave(self):
         self._stop_clock()
         app = get_app_state()
@@ -1435,8 +1765,11 @@ class MatchEntryScreen(BaseManagedScreen):
         return datetime.now().strftime("%H:%M:%S")
 
     def _update_clock(self, *_):
+        current = self._get_current_time_text()
         if hasattr(self, "clock_label"):
-            self.clock_label.text = self._get_current_time_text()
+            self.clock_label.text = current
+        if hasattr(self, "broadcast_clock_label"):
+            self.broadcast_clock_label.text = current
 
     def _start_clock(self) -> None:
         if self._clock_event is None:
@@ -1455,35 +1788,46 @@ class StatsScreen(BaseManagedScreen):
         self.selected_deck = None
         self.deck_menu = None
 
-        # 統計情報を表示するラベルを初期化
         self.stats_label = MDLabel(
             text=get_text("stats.no_data"),
             theme_text_color="Secondary",
         )
 
-        # 絞り込みに利用するボタンを準備
         self.filter_button = MDRaisedButton(
             text=get_text("stats.filter_button"),
             on_press=lambda *_: self.open_deck_menu(),
         )
+        self.filter_button.size_hint = (1, None)
+        self.filter_button.height = dp(48)
 
-        layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
-        layout.add_widget(
-            build_header(
-                get_text("stats.header_title"),
-                lambda: self.change_screen("menu"),
-                lambda: self.change_screen("menu"),
-            )
+        (
+            self.root_layout,
+            content_anchor,
+            action_anchor,
+        ) = self._create_scaffold(
+            get_text("stats.header_title"),
+            lambda: self.change_screen("menu"),
+            lambda: self.change_screen("menu"),
         )
-        layout.add_widget(self.filter_button)
-        layout.add_widget(
-            MDFlatButton(
-                text=get_text("common.clear_filter"),
-                on_press=lambda *_: self.clear_filter(),
-            )
+
+        content_box = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(16),
+            padding=(dp(24), dp(24), dp(24), dp(24)),
+            size_hint=(0.95, 0.95),
         )
-        layout.add_widget(self.stats_label)
-        self.add_widget(layout)
+        content_box.add_widget(self.filter_button)
+        content_box.add_widget(self.stats_label)
+        content_anchor.add_widget(content_box)
+
+        clear_button = MDFlatButton(
+            text=get_text("common.clear_filter"),
+            on_press=lambda *_: self.clear_filter(),
+        )
+        clear_button.size_hint = (None, None)
+        clear_button.height = dp(48)
+        clear_button.width = dp(200)
+        action_anchor.add_widget(clear_button)
 
     def on_pre_enter(self):
         # 画面表示の度に最新の統計を再計算
@@ -1550,9 +1894,9 @@ class StatsScreen(BaseManagedScreen):
             return
 
         total = len(records)
-        win_value, _ = get_text("match_entry.result_options")
-        wins = sum(1 for r in records if r["result"] == win_value)
-        losses = total - wins
+        wins = sum(1 for r in records if int(r["result"]) > 0)
+        draws = sum(1 for r in records if int(r["result"]) == 0)
+        losses = total - wins - draws
         win_rate = (wins / total) * 100
 
         # 集計結果を見やすい文字列にまとめてラベルへ反映
@@ -1563,6 +1907,7 @@ class StatsScreen(BaseManagedScreen):
             header=header,
             total=total,
             wins=wins,
+            draws=draws,
             losses=losses,
             win_rate=win_rate,
         )
@@ -1575,24 +1920,34 @@ class SettingsScreen(BaseManagedScreen):
         self.mode_buttons: dict[str, MDRectangleFlatIconButton] = {}
         self.backup_info_label: MDLabel | None = None
 
-        # 設定項目を縦方向に並べるレイアウト
-        layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
-        layout.add_widget(
-            build_header(
-                get_text("settings.header_title"),
-                lambda: self.change_screen("menu"),
-                lambda: self.change_screen("menu"),
-            )
+        (
+            self.root_layout,
+            content_anchor,
+            action_anchor,
+        ) = self._create_scaffold(
+            get_text("settings.header_title"),
+            lambda: self.change_screen("menu"),
+            lambda: self.change_screen("menu"),
         )
-        layout.add_widget(self._build_ui_section())
-        layout.add_widget(self._build_database_section())
-        layout.add_widget(
-            MDRaisedButton(
-                text=get_text("common.exit"),
-                on_press=lambda *_: self.exit_app(),
-            )
+
+        content_box = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(16),
+            padding=(dp(24), dp(24), dp(24), dp(24)),
+            size_hint=(0.95, 0.95),
         )
-        self.add_widget(layout)
+        content_box.add_widget(self._build_ui_section())
+        content_box.add_widget(self._build_database_section())
+        content_anchor.add_widget(content_box)
+
+        exit_button = MDRaisedButton(
+            text=get_text("common.exit"),
+            on_press=lambda *_: self.exit_app(),
+        )
+        exit_button.size_hint = (None, None)
+        exit_button.height = dp(48)
+        exit_button.width = dp(200)
+        action_anchor.add_widget(exit_button)
 
     def on_pre_enter(self):
         app = get_app_state()
@@ -1854,6 +2209,7 @@ class DeckAnalyzerApp(MDApp):
         sm = MDScreenManager()
         sm.add_widget(MenuScreen(name="menu"))
         sm.add_widget(DeckRegistrationScreen(name="deck_register"))
+        sm.add_widget(SeasonListScreen(name="season_list"))
         sm.add_widget(SeasonRegistrationScreen(name="season_register"))
         sm.add_widget(MatchSetupScreen(name="match_setup"))
         sm.add_widget(MatchEntryScreen(name="match_entry"))
@@ -1882,6 +2238,9 @@ class DeckAnalyzerApp(MDApp):
             try:
                 restored = self.db.import_backup(backup_path)
             except DatabaseError as exc:
+                log_db_error(
+                    "Failed to restore database during migration", exc, backup=str(backup_path)
+                )
                 lines.append(
                     get_text("settings.db_migration_restore_failed").format(error=str(exc))
                 )

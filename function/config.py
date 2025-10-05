@@ -15,7 +15,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "mode": "normal",  # normal | broadcast
     },
     "database": {
-        "expected_version": 2,
+        "expected_version": 3,
         "last_backup": "",
     },
 }

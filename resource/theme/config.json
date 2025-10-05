@@ -1,6 +1,6 @@
 {
   "database": {
-    "expected_version": 2,
+    "expected_version": 3,
     "last_backup": "D:\\_user_template_\\Documents\\PG\\DuelPerformanceLogger\\resource\\theme\\backups\\20251005-140855"
   },
   "ui": {

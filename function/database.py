@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
+from .logger import log_error
+
 
 class DatabaseError(RuntimeError):
     """DB 操作時の想定外エラーを表す基底例外。"""
@@ -47,7 +49,7 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    CURRENT_SCHEMA_VERSION = 2
+    CURRENT_SCHEMA_VERSION = 3
 
     def __init__(self, db_path: Optional[Path | str] = None) -> None:
         # プロジェクトルートからの相対で DB 既定置き場を解決
@@ -187,10 +189,10 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     match_no INTEGER NOT NULL,
                     deck_name TEXT NOT NULL,
-                    turn TEXT NOT NULL CHECK (turn IN ('first', 'second')),
+                    turn INTEGER NOT NULL CHECK (turn IN (0, 1)),
                     opponent_deck TEXT,
                     keywords TEXT,
-                    result TEXT NOT NULL CHECK (result IN ('win', 'lose', 'draw')),
+                    result INTEGER NOT NULL CHECK (result IN (-1, 0, 1)),
                     -- 生成時刻は UTC のエポック秒
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
                 );
@@ -283,6 +285,21 @@ class DatabaseManager:
                             header[i]: values[i]
                             for i in range(min(len(values), len(header)))
                         }
+
+                        if table == "matches":
+                            try:
+                                if "turn" in row_map:
+                                    row_map["turn"] = self._encode_turn(row_map["turn"])
+                                if "result" in row_map:
+                                    row_map["result"] = self._encode_result(row_map["result"])
+                            except ValueError as exc:
+                                log_error(
+                                    "Failed to convert legacy match data during import",
+                                    exc,
+                                    row=row_map,
+                                )
+                                continue
+
                         params = [row_map.get(col) for col in insert_columns]
                         connection.execute(query, params)
                         count += 1
@@ -350,10 +367,10 @@ class DatabaseManager:
                     {
                         "match_no": row["match_no"],
                         "deck_name": row["deck_name"],
-                        "turn": row["turn"],
+                        "turn": self._decode_turn(row["turn"]),
                         "opponent_deck": row["opponent_deck"] or "",
                         "keywords": keywords,
-                        "result": row["result"],
+                        "result": self._decode_result(row["result"]),
                         "created_at": created_at,
                     }
                 )
@@ -385,10 +402,10 @@ class DatabaseManager:
             return {
                 "match_no": row["match_no"],
                 "deck_name": row["deck_name"],
-                "turn": row["turn"],
+                "turn": self._decode_turn(row["turn"]),
                 "opponent_deck": row["opponent_deck"] or "",
                 "keywords": keywords,
-                "result": row["result"],
+                "result": self._decode_result(row["result"]),
                 "created_at": created_at,
             }
 
@@ -419,8 +436,10 @@ class DatabaseManager:
                     (name, description),
                 )
         except sqlite3.IntegrityError as exc:  # pragma: no cover - defensive
+            log_error("Duplicate deck insertion attempted", exc, name=name)
             raise DuplicateEntryError(f"Deck '{name}' already exists") from exc
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to insert deck", exc, name=name)
             raise DatabaseError("Failed to insert deck") from exc
 
     def add_season(
@@ -446,8 +465,10 @@ class DatabaseManager:
                     (name, description, start_date, start_time, end_date, end_time),
                 )
         except sqlite3.IntegrityError as exc:  # pragma: no cover - defensive
+            log_error("Duplicate season insertion attempted", exc, name=name)
             raise DuplicateEntryError(f"Season '{name}' already exists") from exc
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to insert season", exc, name=name)
             raise DatabaseError("Failed to insert season") from exc
 
     def delete_deck(self, name: str) -> None:
@@ -459,6 +480,7 @@ class DatabaseManager:
                 if cursor.rowcount == 0:
                     raise DatabaseError(f"Deck '{name}' not found")
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to delete deck", exc, name=name)
             raise DatabaseError("Failed to delete deck") from exc
 
     def delete_season(self, name: str) -> None:
@@ -470,6 +492,7 @@ class DatabaseManager:
                 if cursor.rowcount == 0:
                     raise DatabaseError(f"Season '{name}' not found")
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to delete season", exc, name=name)
             raise DatabaseError("Failed to delete season") from exc
 
     def record_match(self, record: dict[str, object]) -> None:
@@ -481,6 +504,13 @@ class DatabaseManager:
         """
         keywords = record.get("keywords") or []
         keywords_json = json.dumps(list(keywords), ensure_ascii=False)
+
+        try:
+            turn_value = self._encode_turn(record["turn"])
+            result_value = self._encode_result(record["result"])
+        except (KeyError, ValueError) as exc:
+            log_error("Invalid match record supplied", exc, record=record)
+            raise DatabaseError("Invalid match record") from exc
         try:
             with self._connect() as connection:
                 connection.execute(
@@ -493,13 +523,14 @@ class DatabaseManager:
                     (
                         record.get("match_no", 0),
                         record["deck_name"],
-                        record["turn"],
+                        turn_value,
                         record.get("opponent_deck", ""),
                         keywords_json,
-                        record["result"],
+                        result_value,
                     ),
                 )
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to record match", exc, record=record)
             raise DatabaseError("Failed to record match") from exc
 
     def fetch_opponent_decks(self) -> list[str]:
@@ -537,6 +568,7 @@ class DatabaseManager:
             connection.commit()
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             connection.rollback()
+            log_error("Database transaction failed", exc)
             raise DatabaseError("Database transaction failed") from exc
         finally:
             connection.close()
@@ -552,6 +584,79 @@ class DatabaseManager:
         except (TypeError, ValueError):
             return ""
         return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+    @staticmethod
+    def _encode_turn(value: object) -> int:
+        if isinstance(value, bool):
+            return 1 if value else 0
+        if isinstance(value, (int, float)):
+            return 1 if int(value) != 0 else 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "first", "先攻"}:
+                return 1
+            if normalized in {"0", "false", "second", "後攻"}:
+                return 0
+        raise ValueError(f"Unsupported turn value: {value!r}")
+
+    @staticmethod
+    def _encode_result(value: object) -> int:
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            mapping = {
+                "win": 1,
+                "lose": -1,
+                "loss": -1,
+                "draw": 0,
+                "victory": 1,
+                "敗北": -1,
+                "勝ち": 1,
+                "負け": -1,
+                "引き分け": 0,
+            }
+            if normalized in mapping:
+                return mapping[normalized]
+            if normalized in {"1", "-1", "0"}:
+                return int(normalized)
+        raise ValueError(f"Unsupported result value: {value!r}")
+
+    @staticmethod
+    def _decode_turn(value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return int(value) != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"first", "先攻", "true", "1"}:
+                return True
+            if normalized in {"second", "後攻", "false", "0"}:
+                return False
+        return False
+
+    @staticmethod
+    def _decode_result(value: object) -> int:
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            mapping = {
+                "win": 1,
+                "victory": 1,
+                "lose": -1,
+                "loss": -1,
+                "draw": 0,
+                "勝ち": 1,
+                "負け": -1,
+                "引き分け": 0,
+            }
+            if normalized in mapping:
+                return mapping[normalized]
+            if normalized in {"1", "-1", "0"}:
+                return int(normalized)
+        return 0
 
 
 # 将来の拡張メモ
