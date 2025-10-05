@@ -137,18 +137,28 @@ class DatabaseManager:
             )
 
     def initialize_database(self) -> None:
-        """DB を初期化（既存があれば削除→再作成）。
+        """DB を初期化（既存ファイルを残したままスキーマを再構築）。
 
         - 何度呼んでも安全（冪等）な設計です。
-        - **既存ファイルは削除** されるためデータは消去されます（運用時は注意）。
+        - 既存ファイルは削除せず、同一コネクション上で `DROP` → `CREATE` を実行します。
         """
-        if self._db_path.exists():
-            self._db_path.unlink()
 
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
 
         with sqlite3.connect(self._db_path) as connection:
             cursor = connection.cursor()
+
+            # 既存スキーマを安全に破棄（外部キー制約は一時的に OFF）
+            cursor.execute("PRAGMA foreign_keys = OFF;")
+            cursor.executescript(
+                """
+                DROP TABLE IF EXISTS matches;
+                DROP TABLE IF EXISTS seasons;
+                DROP TABLE IF EXISTS decks;
+                DROP TABLE IF EXISTS db_metadata;
+                """
+            )
+
             cursor.execute("PRAGMA foreign_keys = ON;")
             cursor.executescript(
                 """

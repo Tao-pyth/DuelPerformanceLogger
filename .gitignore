@@ -1,3 +1,5 @@
 resource/theme/font/mgenplus-1c-regular.ttf
 resource/db/*.sqlite3
 resource/db/*.db
+__pycache__/
+*/__pycache__/
