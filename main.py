@@ -1,3 +1,6 @@
+import math
+from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -23,14 +26,18 @@ from kivy.uix.widget import Widget
 from kivy.metrics import dp
 from kivy.core.text import LabelBase, DEFAULT_FONT
 from kivy.core.window import Window
+from kivy.clock import Clock
 from kivymd.toast import toast
 from kivymd.uix.dialog import MDDialog
 
 from function.resources import get_text
+from function.config import load_config, save_config, get_config_path
 from function import DatabaseManager, DatabaseError, DuplicateEntryError
 
 # 日本語フォント設定
-LabelBase.register(DEFAULT_FONT, r'resource\\theme\\font\\mgenplus-1c-regular.ttf')
+_FONT_PATH = Path(__file__).resolve().parent / "resource" / "theme" / "font" / "mgenplus-1c-regular.ttf"
+if _FONT_PATH.exists():
+    LabelBase.register(DEFAULT_FONT, str(_FONT_PATH))
 
 
 class _FallbackAppState:
@@ -41,6 +48,8 @@ class _FallbackAppState:
         self.reset()
 
     def reset(self):
+        self.config = load_config()
+        self.ui_mode = self.config.get("ui", {}).get("mode", "normal")
         self.decks = []
         self.seasons = []
         self.match_records = []
@@ -48,6 +57,8 @@ class _FallbackAppState:
         self.current_match_count = 0
         self.db: Optional[DatabaseManager] = None
         self.opponent_decks: list[str] = []
+        self.default_window_size = Window.size
+        self.migration_result: str = ""
 
 
 _fallback_app_state = _FallbackAppState()
@@ -62,12 +73,9 @@ def get_app_state():
     return app
 
 
-def build_header(title, back_callback=None):
+def build_header(title, back_callback=None, top_callback=None):
     """アプリ画面上部のヘッダーを生成する共通ユーティリティ."""
 
-    # 画面上部に固定配置されるヘッダーレイアウト。
-    # 戻るボタン/タイトル/余白の 3 要素を横並びにし、
-    # どの画面でも UI 一貫性を保つようにしている。
     header = MDBoxLayout(
         orientation="horizontal",
         size_hint_y=None,
@@ -76,37 +84,86 @@ def build_header(title, back_callback=None):
         spacing=dp(12),
     )
 
+    action_box = MDBoxLayout(
+        orientation="horizontal",
+        spacing=dp(8),
+        size_hint_x=None,
+    )
+    action_box.bind(minimum_width=action_box.setter("width"))
+
+    button_style = {
+        "size_hint": (None, None),
+        "height": dp(40),
+        "md_bg_color": (0.93, 0.96, 0.98, 1),
+        "text_color": (0.18, 0.36, 0.58, 1),
+        "line_color": (0.18, 0.36, 0.58, 1),
+    }
+
+    if top_callback is not None:
+        top_button = MDRectangleFlatIconButton(
+            text=get_text("common.return_to_top"),
+            icon="home",
+            on_press=lambda *_: top_callback(),
+        )
+        for key, value in button_style.items():
+            setattr(top_button, key, value)
+        action_box.add_widget(top_button)
+
     if back_callback is not None:
-        # 左上に常に表示される戻るボタン。視認性向上のため背景色とアイコンを付与。
         back_button = MDRectangleFlatIconButton(
             text=get_text("common.back"),
             icon="arrow-left",
             on_press=lambda *_: back_callback(),
         )
-        back_button.size_hint = (None, None)
-        back_button.height = dp(40)
-        back_button.md_bg_color = (0.93, 0.96, 0.98, 1)
-        back_button.text_color = (0.18, 0.36, 0.58, 1)
-        back_button.line_color = (0.18, 0.36, 0.58, 1)
-        header.add_widget(back_button)
+        for key, value in button_style.items():
+            setattr(back_button, key, value)
+        action_box.add_widget(back_button)
+
+    if action_box.children:
+        header.add_widget(action_box)
+        right_spacer = Widget(size_hint_x=None, width=action_box.width)
+
+        def _sync_width(instance, value):
+            right_spacer.width = value
+
+        action_box.bind(width=_sync_width)
     else:
-        # 戻るボタンなしでもタイトルが中央に来るようダミー領域を確保。
-        header.add_widget(Widget(size_hint_x=None, width=dp(48)))
+        placeholder_width = dp(48)
+        header.add_widget(Widget(size_hint_x=None, width=placeholder_width))
+        right_spacer = Widget(size_hint_x=None, width=placeholder_width)
 
     header_label = MDLabel(text=title, font_style="H5", halign="center")
     header_label.size_hint_x = 1
     header.add_widget(header_label)
 
-    # タイトルを正確に中央揃えにするため末尾にも余白を確保。
-    header.add_widget(Widget(size_hint_x=None, width=dp(48)))
+    header.add_widget(right_spacer)
 
     return header
+
+
+def _parse_schedule_datetime(date_text: str | None, time_text: str | None) -> Optional[datetime]:
+    if not date_text:
+        return None
+    try:
+        if time_text:
+            return datetime.strptime(f"{date_text} {time_text}", "%Y-%m-%d %H:%M")
+        return datetime.strptime(date_text, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _days_until(target: datetime) -> int:
+    delta = target - datetime.now()
+    if delta.total_seconds() <= 0:
+        return 0
+    return math.ceil(delta.total_seconds() / 86400)
 
 class MenuScreen(MDScreen):
     """アプリケーションの初期画面."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.migration_dialog: MDDialog | None = None
 
         # 画面全体の配置を縦方向に整えるルートレイアウト
         root_layout = MDBoxLayout(orientation="vertical", spacing=0)
@@ -141,6 +198,33 @@ class MenuScreen(MDScreen):
         scroll_view.add_widget(content)
         root_layout.add_widget(scroll_view)
         self.add_widget(root_layout)
+
+    def on_pre_enter(self):
+        app = get_app_state()
+        message = getattr(app, "migration_result", "")
+        if message:
+            Clock.schedule_once(lambda *_: self._show_migration_message(message), 0)
+            app.migration_result = ""
+
+    def _show_migration_message(self, message: str):
+        if self.migration_dialog:
+            self.migration_dialog.dismiss()
+        self.migration_dialog = MDDialog(
+            title=get_text("settings.db_migration_title"),
+            text=message,
+            buttons=[
+                MDFlatButton(
+                    text=get_text("common.close"),
+                    on_release=lambda *_: self._dismiss_dialog(),
+                )
+            ],
+        )
+        self.migration_dialog.open()
+
+    def _dismiss_dialog(self):
+        if self.migration_dialog:
+            self.migration_dialog.dismiss()
+            self.migration_dialog = None
 
     def _build_hero_card(self):
         # アプリ紹介を行うカードレイアウト
@@ -336,6 +420,7 @@ class DeckRegistrationScreen(BaseManagedScreen):
             build_header(
                 get_text("deck_registration.header_title"),
                 lambda: self.change_screen("menu"),
+                lambda: self.change_screen("menu"),
             )
         )
 
@@ -350,15 +435,6 @@ class DeckRegistrationScreen(BaseManagedScreen):
         )
         layout.add_widget(self.deck_empty_label)
         layout.add_widget(self.deck_scroll)
-
-        # メニュー画面へ戻るためのボタン
-        back_button = MDFlatButton(
-            text=get_text("common.return_to_top"),
-            on_press=lambda *_: self.change_screen("menu"),
-        )
-        back_button.size_hint_y = None
-        back_button.height = dp(48)
-        layout.add_widget(back_button)
 
         self.add_widget(layout)
 
@@ -491,6 +567,18 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             multiline=True,
             max_text_length=200,
         )
+        self.start_date_field = MDTextField(
+            hint_text=get_text("season_registration.start_date_hint"),
+        )
+        self.start_time_field = MDTextField(
+            hint_text=get_text("season_registration.start_time_hint"),
+        )
+        self.end_date_field = MDTextField(
+            hint_text=get_text("season_registration.end_date_hint"),
+        )
+        self.end_time_field = MDTextField(
+            hint_text=get_text("season_registration.end_time_hint"),
+        )
         # 登録済みシーズンをまとめて表示するラベル
         self.season_empty_label = MDLabel(
             text=get_text("season_registration.empty_message"),
@@ -513,10 +601,35 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             build_header(
                 get_text("season_registration.header_title"),
                 lambda: self.change_screen("menu"),
+                lambda: self.change_screen("menu"),
             )
         )
         layout.add_widget(self.name_field)
         layout.add_widget(self.description_field)
+        layout.add_widget(
+            MDLabel(
+                text=get_text("season_registration.schedule_section_title"),
+                theme_text_color="Secondary",
+            )
+        )
+
+        schedule_box = MDBoxLayout(orientation="vertical", spacing=dp(12))
+
+        start_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(72))
+        for field in (self.start_date_field, self.start_time_field):
+            field.size_hint = (1, None)
+            field.height = dp(72)
+            start_row.add_widget(field)
+        schedule_box.add_widget(start_row)
+
+        end_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(72))
+        for field in (self.end_date_field, self.end_time_field):
+            field.size_hint = (1, None)
+            field.height = dp(72)
+            end_row.add_widget(field)
+        schedule_box.add_widget(end_row)
+
+        layout.add_widget(schedule_box)
         layout.add_widget(
             MDRaisedButton(
                 text=get_text("common.register"),
@@ -525,13 +638,6 @@ class SeasonRegistrationScreen(BaseManagedScreen):
         )
         layout.add_widget(self.season_empty_label)
         layout.add_widget(self.season_scroll)
-        back_button = MDFlatButton(
-            text=get_text("common.return_to_top"),
-            on_press=lambda *_: self.change_screen("menu"),
-        )
-        back_button.size_hint_y = None
-        back_button.height = dp(48)
-        layout.add_widget(back_button)
 
         self.add_widget(layout)
 
@@ -550,8 +656,20 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             toast(get_text("common.db_error"))
             return
 
+        start_date = self.start_date_field.text.strip() or None
+        start_time = self.start_time_field.text.strip() or None
+        end_date = self.end_date_field.text.strip() or None
+        end_time = self.end_time_field.text.strip() or None
+
         try:
-            db.add_season(name, description)
+            db.add_season(
+                name,
+                description,
+                start_date=start_date,
+                start_time=start_time,
+                end_date=end_date,
+                end_time=end_time,
+            )
         except DuplicateEntryError:
             toast(get_text("season_registration.toast_duplicate"))
             return
@@ -563,6 +681,10 @@ class SeasonRegistrationScreen(BaseManagedScreen):
         toast(get_text("season_registration.toast_registered"))
         self.name_field.text = ""
         self.description_field.text = ""
+        self.start_date_field.text = ""
+        self.start_time_field.text = ""
+        self.end_date_field.text = ""
+        self.end_time_field.text = ""
         self.update_season_list()
 
     def on_pre_enter(self):
@@ -591,41 +713,96 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             for season in app.seasons:
                 self.season_list_container.add_widget(self._create_season_card(season))
 
-    def _create_season_card(self, season: dict[str, str]):
+    def _create_season_card(self, season: dict[str, object]):
         """シーズン情報 1 件を表示するカードを生成する."""
 
         fallback_description = get_text("common.no_description")
         card = MDCard(
-            orientation="horizontal",
-            padding=(dp(16), dp(12), dp(12), dp(12)),
+            orientation="vertical",
+            padding=(dp(16), dp(16), dp(16), dp(16)),
             size_hint=(1, None),
-            height=dp(84),
             radius=[16, 16, 16, 16],
         )
+        card.spacing = dp(6)
 
-        text_box = MDBoxLayout(orientation="vertical", spacing=dp(4))
-        text_box.add_widget(
+        header = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(36))
+        header.add_widget(
             MDLabel(text=season["name"], font_style="Subtitle1", shorten=True)
         )
-        text_box.add_widget(
-            MDLabel(
-                text=season["description"] or fallback_description,
-                theme_text_color="Secondary",
-                shorten=True,
-            )
-        )
-
-        card.add_widget(text_box)
-        card.add_widget(Widget())
-
+        header.add_widget(Widget())
         delete_button = MDIconButton(
             icon="delete", on_release=lambda *_: self.delete_season(season["name"])
         )
         delete_button.theme_text_color = "Custom"
         delete_button.text_color = (0.86, 0.16, 0.16, 1)
-        card.add_widget(delete_button)
+        header.add_widget(delete_button)
+        card.add_widget(header)
+
+        card.add_widget(
+            MDLabel(
+                text=season.get("description") or fallback_description,
+                theme_text_color="Secondary",
+                shorten=True,
+            )
+        )
+
+        for line in self._build_schedule_lines(season):
+            card.add_widget(
+                MDLabel(
+                    text=line,
+                    theme_text_color="Hint",
+                )
+            )
 
         return card
+
+    def _build_schedule_lines(self, season: dict[str, object]) -> list[str]:
+        lines: list[str] = []
+        now = datetime.now()
+
+        start_date = season.get("start_date") or ""
+        start_time = season.get("start_time") or ""
+        end_date = season.get("end_date") or ""
+        end_time = season.get("end_time") or ""
+
+        start_dt = _parse_schedule_datetime(start_date, start_time)
+        end_dt = _parse_schedule_datetime(end_date, end_time)
+
+        if start_dt:
+            display_time = start_time or "--:--"
+            lines.append(
+                get_text("season_registration.schedule_start_label").format(
+                    date=start_dt.strftime("%Y-%m-%d"),
+                    time=display_time,
+                )
+            )
+            if start_dt > now:
+                days = _days_until(start_dt)
+                if days > 0:
+                    lines.append(
+                        get_text("season_registration.schedule_starts_in").format(days=days)
+                    )
+            elif end_dt and end_dt > now:
+                lines.append(get_text("season_registration.schedule_running"))
+
+        if end_dt:
+            display_time = end_time or "--:--"
+            lines.append(
+                get_text("season_registration.schedule_end_label").format(
+                    date=end_dt.strftime("%Y-%m-%d"),
+                    time=display_time,
+                )
+            )
+            if end_dt > now:
+                days = _days_until(end_dt)
+                if days > 0:
+                    lines.append(
+                        get_text("season_registration.schedule_ends_in").format(days=days)
+                    )
+            else:
+                lines.append(get_text("season_registration.schedule_finished"))
+
+        return lines
 
     def delete_season(self, name: str):
         """指定シーズンを削除し、一覧を更新する."""
@@ -669,6 +846,7 @@ class MatchSetupScreen(BaseManagedScreen):
             build_header(
                 get_text("match_setup.header_title"),
                 lambda: self.change_screen("menu"),
+                lambda: self.change_screen("menu"),
             )
         )
         # ラベルを追加し、入力項目の意味を明確にする
@@ -696,13 +874,6 @@ class MatchSetupScreen(BaseManagedScreen):
                 on_press=lambda *_: self.start_entry(),
             )
         )
-        layout.add_widget(
-            MDFlatButton(
-                text=get_text("common.return_to_top"),
-                on_press=lambda *_: self.change_screen("menu"),
-            )
-        )
-
         self.add_widget(layout)
 
     def on_pre_enter(self):
@@ -785,6 +956,7 @@ class MatchEntryScreen(BaseManagedScreen):
         header = build_header(
             get_text("match_entry.header_title"),
             lambda: self.change_screen("match_setup"),
+            lambda: self.change_screen("menu"),
         )
 
         self.status_label = MDLabel(
@@ -896,6 +1068,21 @@ class MatchEntryScreen(BaseManagedScreen):
 
         scroll_view.add_widget(content)
         root_layout.add_widget(scroll_view)
+
+        self.root_layout = root_layout
+        self.content_layout = content
+        self.scroll_view = scroll_view
+        self.opponent_row = opponent_row
+        self.quick_actions = quick_actions
+        self.quick_action_buttons = [clear_button, record_button, back_button]
+        self.default_padding = tuple(content.padding)
+        self.default_spacing = content.spacing
+        self.compact_padding = (dp(16), dp(12), dp(16), dp(12))
+        self.compact_spacing = dp(8)
+        self.default_opponent_height = opponent_row.height
+        self.compact_opponent_height = dp(56)
+        self.default_quick_height = quick_actions.height
+        self.compact_quick_height = dp(40)
 
         self.add_widget(root_layout)
 
@@ -1098,8 +1285,42 @@ class MatchEntryScreen(BaseManagedScreen):
                 button.text_color = primary
                 button.md_bg_color = (1, 1, 1, 1)
 
+    def _apply_mode_layout(self, mode: str) -> None:
+        if mode == "broadcast":
+            self.content_layout.padding = self.compact_padding
+            self.content_layout.spacing = self.compact_spacing
+            self.quick_actions.height = self.compact_quick_height
+            for button in self.quick_action_buttons:
+                button.height = self.compact_quick_height
+            self.opponent_row.height = self.compact_opponent_height
+            self.opponent_field.height = self.compact_opponent_height
+            self.status_label.font_style = "Subtitle1"
+        else:
+            self.content_layout.padding = self.default_padding
+            self.content_layout.spacing = self.default_spacing
+            self.quick_actions.height = self.default_quick_height
+            for button in self.quick_action_buttons:
+                button.height = self.default_quick_height
+            self.opponent_row.height = self.default_opponent_height
+            self.opponent_field.height = self.default_opponent_height
+            self.status_label.font_style = "H5"
+
+    def _sync_window_size(self, mode: str) -> None:
+        app = get_app_state()
+        if mode == "broadcast":
+            if not getattr(app, "default_window_size", None):
+                app.default_window_size = Window.size
+            Window.size = (1080, 280)
+        else:
+            default_size = getattr(app, "default_window_size", None)
+            if default_size:
+                Window.size = default_size
+
     def on_pre_enter(self):
         app = get_app_state()
+        mode = getattr(app, "ui_mode", "normal")
+        self._apply_mode_layout(mode)
+        self._sync_window_size(mode)
         settings = getattr(app, "current_match_settings", None)
         self.refresh_opponent_menu()
         if not settings:
@@ -1194,6 +1415,12 @@ class MatchEntryScreen(BaseManagedScreen):
         if focus_opponent:
             self.opponent_field.focus = True
 
+    def on_leave(self):
+        app = get_app_state()
+        default_size = getattr(app, "default_window_size", None)
+        if default_size:
+            Window.size = default_size
+
 
 class StatsScreen(BaseManagedScreen):
     def __init__(self, **kwargs):
@@ -1218,6 +1445,7 @@ class StatsScreen(BaseManagedScreen):
             build_header(
                 get_text("stats.header_title"),
                 lambda: self.change_screen("menu"),
+                lambda: self.change_screen("menu"),
             )
         )
         layout.add_widget(self.filter_button)
@@ -1228,13 +1456,6 @@ class StatsScreen(BaseManagedScreen):
             )
         )
         layout.add_widget(self.stats_label)
-        layout.add_widget(
-            MDFlatButton(
-                text=get_text("common.return_to_top"),
-                on_press=lambda *_: self.change_screen("menu"),
-            )
-        )
-
         self.add_widget(layout)
 
     def on_pre_enter(self):
@@ -1324,6 +1545,8 @@ class SettingsScreen(BaseManagedScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.confirm_dialog: MDDialog | None = None
+        self.mode_buttons: dict[str, MDRectangleFlatIconButton] = {}
+        self.backup_info_label: MDLabel | None = None
 
         # 設定項目を縦方向に並べるレイアウト
         layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
@@ -1331,14 +1554,10 @@ class SettingsScreen(BaseManagedScreen):
             build_header(
                 get_text("settings.header_title"),
                 lambda: self.change_screen("menu"),
+                lambda: self.change_screen("menu"),
             )
         )
-        layout.add_widget(
-            MDLabel(
-                text=get_text("common.app_settings"),
-                theme_text_color="Secondary",
-            )
-        )
+        layout.add_widget(self._build_ui_section())
         layout.add_widget(self._build_database_section())
         layout.add_widget(
             MDRaisedButton(
@@ -1346,13 +1565,13 @@ class SettingsScreen(BaseManagedScreen):
                 on_press=lambda *_: self.exit_app(),
             )
         )
-        layout.add_widget(
-            MDFlatButton(
-                text=get_text("common.return_to_top"),
-                on_press=lambda *_: self.change_screen("menu"),
-            )
-        )
         self.add_widget(layout)
+
+    def on_pre_enter(self):
+        app = get_app_state()
+        mode = getattr(app, "ui_mode", "normal")
+        self._update_mode_buttons(mode)
+        self._update_backup_label()
 
     def _build_database_section(self):
         card = MDCard(
@@ -1370,6 +1589,23 @@ class SettingsScreen(BaseManagedScreen):
         )
         card.add_widget(
             MDLabel(
+                text=get_text("settings.backup_description"),
+                theme_text_color="Secondary",
+            )
+        )
+        self.backup_info_label = MDLabel(
+            text="",
+            theme_text_color="Hint",
+        )
+        card.add_widget(self.backup_info_label)
+        card.add_widget(
+            MDRaisedButton(
+                text=get_text("settings.backup_button"),
+                on_press=lambda *_: self.create_backup(),
+            )
+        )
+        card.add_widget(
+            MDLabel(
                 text=get_text("settings.db_init_description"),
                 theme_text_color="Secondary",
             )
@@ -1381,6 +1617,108 @@ class SettingsScreen(BaseManagedScreen):
             )
         )
         return card
+
+    def _build_ui_section(self):
+        card = MDCard(
+            orientation="vertical",
+            padding=(dp(16), dp(16), dp(16), dp(16)),
+            size_hint=(1, None),
+            radius=[16, 16, 16, 16],
+        )
+        card.spacing = dp(12)
+        card.add_widget(
+            MDLabel(
+                text=get_text("settings.ui_section_title"),
+                font_style="Subtitle1",
+            )
+        )
+        card.add_widget(
+            MDLabel(
+                text=get_text("settings.ui_mode_description"),
+                theme_text_color="Secondary",
+            )
+        )
+
+        button_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(48))
+        modes = [
+            ("normal", "settings.mode_normal", "monitor"),
+            ("broadcast", "settings.mode_broadcast", "cast"),
+        ]
+
+        for mode_value, text_key, icon in modes:
+            button = MDRectangleFlatIconButton(
+                text=get_text(text_key),
+                icon=icon,
+            )
+            button.size_hint = (1, None)
+            button.height = dp(48)
+            self.mode_buttons[mode_value] = button
+            button_row.add_widget(button)
+
+            def make_callback(value: str):
+                return lambda *_: self._set_ui_mode(value)
+
+            button.bind(on_press=make_callback(mode_value))
+
+        card.add_widget(button_row)
+        return card
+
+    def _set_ui_mode(self, mode: str) -> None:
+        app = get_app_state()
+        app.ui_mode = mode
+        if getattr(app, "config", None) is None:
+            app.config = load_config()
+        app.config.setdefault("ui", {})["mode"] = mode
+        save_config(app.config)
+        _fallback_app_state.ui_mode = mode
+        _fallback_app_state.config = dict(app.config)
+        self._update_mode_buttons(mode)
+        toast(get_text("settings.mode_updated"))
+
+    def _update_mode_buttons(self, selected: str) -> None:
+        for mode, button in self.mode_buttons.items():
+            if mode == selected:
+                button.md_bg_color = (0.18, 0.36, 0.58, 1)
+                button.text_color = (1, 1, 1, 1)
+                button.line_color = (0.18, 0.36, 0.58, 1)
+            else:
+                button.md_bg_color = (1, 1, 1, 1)
+                button.text_color = (0.18, 0.36, 0.58, 1)
+                button.line_color = (0.18, 0.36, 0.58, 1)
+
+    def _update_backup_label(self) -> None:
+        if not self.backup_info_label:
+            return
+        app = get_app_state()
+        config = getattr(app, "config", None) or load_config()
+        last_backup = config.get("database", {}).get("last_backup")
+        if last_backup:
+            self.backup_info_label.text = get_text("settings.last_backup").format(
+                path=last_backup
+            )
+        else:
+            self.backup_info_label.text = get_text("settings.no_backup")
+
+    def create_backup(self) -> None:
+        app = get_app_state()
+        db = getattr(app, "db", None)
+        if db is None:
+            toast(get_text("common.db_error"))
+            return
+
+        try:
+            backup_path = db.export_backup()
+        except Exception:  # pragma: no cover - defensive
+            toast(get_text("settings.backup_failure"))
+            return
+
+        if getattr(app, "config", None) is None:
+            app.config = load_config()
+        app.config.setdefault("database", {})["last_backup"] = str(backup_path)
+        save_config(app.config)
+        _fallback_app_state.config = dict(app.config)
+        self._update_backup_label()
+        toast(get_text("settings.backup_success"))
 
     def open_db_init_dialog(self):
         if self.confirm_dialog:
@@ -1447,8 +1785,26 @@ class SettingsScreen(BaseManagedScreen):
 class DeckAnalyzerApp(MDApp):
     def build(self):
         self.theme_cls.primary_palette = "BlueGray"
+        self.config = load_config()
+        self.ui_mode = self.config.get("ui", {}).get("mode", "normal")
+        self.default_window_size = Window.size
+
         self.db = DatabaseManager()
         self.db.ensure_database()
+
+        expected_version = self.config.get("database", {}).get(
+            "expected_version", DatabaseManager.CURRENT_SCHEMA_VERSION
+        )
+        current_version = self.db.get_schema_version()
+        if current_version != expected_version:
+            self.migration_result = self._handle_version_mismatch(
+                current_version, expected_version
+            )
+        else:
+            self.migration_result = ""
+
+        self.db.set_schema_version(expected_version)
+
         self.decks = self.db.fetch_decks()
         self.seasons = self.db.fetch_seasons()
         self.match_records = self.db.fetch_matches()
@@ -1463,6 +1819,11 @@ class DeckAnalyzerApp(MDApp):
         _fallback_app_state.seasons = list(self.seasons)
         _fallback_app_state.match_records = list(self.match_records)
         _fallback_app_state.opponent_decks = list(self.opponent_decks)
+        _fallback_app_state.config = dict(self.config)
+        _fallback_app_state.ui_mode = self.ui_mode
+        _fallback_app_state.default_window_size = self.default_window_size
+        _fallback_app_state.migration_result = self.migration_result
+
         sm = MDScreenManager()
         sm.add_widget(MenuScreen(name="menu"))
         sm.add_widget(DeckRegistrationScreen(name="deck_register"))
@@ -1472,6 +1833,52 @@ class DeckAnalyzerApp(MDApp):
         sm.add_widget(StatsScreen(name="stats"))
         sm.add_widget(SettingsScreen(name="settings"))
         return sm
+
+    def _handle_version_mismatch(self, current_version: int, expected_version: int) -> str:
+        lines = [
+            get_text("settings.db_migration_detected").format(
+                current=current_version, expected=expected_version
+            )
+        ]
+
+        try:
+            backup_path = self.db.export_backup()
+            lines.append(
+                get_text("settings.db_migration_backup").format(path=str(backup_path))
+            )
+            self.config.setdefault("database", {})["last_backup"] = str(backup_path)
+            save_config(self.config)
+
+            self.db.initialize_database()
+            self.db.set_schema_version(expected_version)
+
+            try:
+                restored = self.db.import_backup(backup_path)
+            except DatabaseError as exc:
+                lines.append(
+                    get_text("settings.db_migration_restore_failed").format(error=str(exc))
+                )
+                return "\n".join(
+                    [get_text("settings.db_migration_failure").format(error=str(exc))]
+                    + lines
+                )
+            else:
+                lines.append(
+                    get_text("settings.db_migration_restore_success").format(
+                        decks=restored.get("decks", 0),
+                        seasons=restored.get("seasons", 0),
+                        matches=restored.get("matches", 0),
+                    )
+                )
+
+            return "\n".join([get_text("settings.db_migration_success")] + lines)
+        except Exception as exc:  # pragma: no cover - defensive
+            return "\n".join(
+                [
+                    get_text("settings.db_migration_failure").format(error=str(exc)),
+                    *lines,
+                ]
+            )
 
 if __name__ == '__main__':
     DeckAnalyzerApp().run()

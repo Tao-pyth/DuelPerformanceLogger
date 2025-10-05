@@ -1,0 +1,9 @@
+{
+  "ui": {
+    "mode": "normal"
+  },
+  "database": {
+    "expected_version": 2,
+    "last_backup": ""
+  }
+}
