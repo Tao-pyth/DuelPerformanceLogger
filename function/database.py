@@ -20,6 +20,7 @@ UI 層では辞書（dict）ベースのデータ構造だけを扱えるよう�
 
 from __future__ import annotations
 
+import csv
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -45,6 +46,8 @@ class DatabaseManager:
         データベースファイルのパス。未指定時は ``resource/db/duel_performance.sqlite3`` を使用。
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
+
+    CURRENT_SCHEMA_VERSION = 2
 
     def __init__(self, db_path: Optional[Path | str] = None) -> None:
         # プロジェクトルートからの相対で DB 既定置き場を解決
@@ -89,6 +92,33 @@ class DatabaseManager:
         if not self._db_path.exists():
             self.initialize_database()
 
+    # ------------------------------------------------------------------
+    # バージョン管理
+    # ------------------------------------------------------------------
+    def get_schema_version(self) -> int:
+        """保存されているスキーマバージョンを取得する。"""
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "SELECT value FROM db_metadata WHERE key = 'schema_version'"
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    return 0
+                return int(row["value"])
+        except (ValueError, sqlite3.DatabaseError):  # pragma: no cover - defensive
+            return 0
+
+    def set_schema_version(self, version: int) -> None:
+        """スキーマバージョンを更新する。"""
+
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
+                ("schema_version", str(int(version))),
+            )
+
     def initialize_database(self) -> None:
         """DB を初期化（既存があれば削除→再作成）。
 
@@ -105,6 +135,11 @@ class DatabaseManager:
             cursor.execute("PRAGMA foreign_keys = ON;")
             cursor.executescript(
                 """
+                CREATE TABLE db_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+
                 CREATE TABLE decks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
@@ -114,7 +149,11 @@ class DatabaseManager:
                 CREATE TABLE seasons (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
-                    description TEXT DEFAULT ''
+                    description TEXT DEFAULT '',
+                    start_date TEXT,
+                    start_time TEXT,
+                    end_date TEXT,
+                    end_time TEXT
                 );
 
                 CREATE TABLE matches (
@@ -139,6 +178,91 @@ class DatabaseManager:
                 """
             )
 
+            cursor.execute(
+                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
+                ("schema_version", str(self.CURRENT_SCHEMA_VERSION)),
+            )
+
+    # ------------------------------------------------------------------
+    # バックアップユーティリティ
+    # ------------------------------------------------------------------
+    def export_backup(self, destination: Optional[Path | str] = None) -> Path:
+        """現在の DB 内容を CSV として保存し、作成先パスを返す。"""
+
+        if destination is None:
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            destination = (
+                Path(__file__).resolve().parent.parent
+                / "resource"
+                / "theme"
+                / "backups"
+                / timestamp
+            )
+        else:
+            destination = Path(destination)
+
+        destination.mkdir(parents=True, exist_ok=True)
+
+        with self._connect() as connection:
+            tables = ("decks", "seasons", "matches")
+            for table in tables:
+                cursor = connection.execute(f"SELECT * FROM {table}")
+                columns = [col[0] for col in cursor.description]
+                file_path = destination / f"{table}.csv"
+                with file_path.open("w", encoding="utf-8", newline="") as stream:
+                    writer = csv.writer(stream)
+                    writer.writerow(columns)
+                    for row in cursor.fetchall():
+                        writer.writerow([row[col] for col in columns])
+
+        return destination
+
+    def import_backup(self, source: Path | str) -> dict[str, int]:
+        """CSV バックアップからデータを読み込み復元する。"""
+
+        source_path = Path(source)
+        if not source_path.exists():
+            raise DatabaseError(f"Backup source '{source}' not found")
+
+        restored: dict[str, int] = {}
+
+        with self.transaction() as connection:
+            for table in ("decks", "seasons", "matches"):
+                file_path = source_path / f"{table}.csv"
+                if not file_path.exists():
+                    continue
+
+                with file_path.open("r", encoding="utf-8", newline="") as stream:
+                    reader = csv.reader(stream)
+                    header = next(reader, None)
+                    if not header:
+                        continue
+
+                    column_info = connection.execute(
+                        f"PRAGMA table_info({table})"
+                    ).fetchall()
+                    valid_columns = [row[1] for row in column_info]
+                    insert_columns = [col for col in header if col in valid_columns]
+                    if not insert_columns:
+                        continue
+
+                    placeholders = ", ".join(["?"] * len(insert_columns))
+                    column_list = ", ".join(insert_columns)
+                    query = f"INSERT INTO {table} ({column_list}) VALUES ({placeholders})"
+
+                    count = 0
+                    for values in reader:
+                        row_map = {
+                            header[i]: values[i]
+                            for i in range(min(len(values), len(header)))
+                        }
+                        params = [row_map.get(col) for col in insert_columns]
+                        connection.execute(query, params)
+                        count += 1
+                    restored[table] = count
+
+        return restored
+
     # ------------------------------------------------------------------
     # 取得系ヘルパー
     # ------------------------------------------------------------------
@@ -150,11 +274,21 @@ class DatabaseManager:
             )
             return [dict(row) for row in cursor.fetchall()]
 
-    def fetch_seasons(self) -> list[dict[str, str]]:
+    def fetch_seasons(self) -> list[dict[str, object]]:
         """登録済みシーズンを名称順で返却。"""
         with self._connect() as connection:
             cursor = connection.execute(
-                "SELECT name, description FROM seasons ORDER BY name COLLATE NOCASE"
+                """
+                SELECT
+                    name,
+                    description,
+                    start_date,
+                    start_time,
+                    end_date,
+                    end_time
+                FROM seasons
+                ORDER BY name COLLATE NOCASE
+                """
             )
             return [dict(row) for row in cursor.fetchall()]
 
@@ -262,13 +396,27 @@ class DatabaseManager:
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             raise DatabaseError("Failed to insert deck") from exc
 
-    def add_season(self, name: str, description: str = "") -> None:
+    def add_season(
+        self,
+        name: str,
+        description: str = "",
+        *,
+        start_date: str | None = None,
+        start_time: str | None = None,
+        end_date: str | None = None,
+        end_time: str | None = None,
+    ) -> None:
         """シーズン定義を追加。重複時は `DuplicateEntryError`。"""
         try:
             with self._connect() as connection:
                 connection.execute(
-                    "INSERT INTO seasons (name, description) VALUES (?, ?)",
-                    (name, description),
+                    """
+                    INSERT INTO seasons (
+                        name, description, start_date, start_time, end_date, end_time
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (name, description, start_date, start_time, end_date, end_time),
                 )
         except sqlite3.IntegrityError as exc:  # pragma: no cover - defensive
             raise DuplicateEntryError(f"Season '{name}' already exists") from exc

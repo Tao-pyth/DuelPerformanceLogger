@@ -9,7 +9,7 @@ from typing import Any
 
 
 # 文字列リソースが格納されているディレクトリを事前に解決しておく。
-_RESOURCE_DIR = Path(__file__).resolve().parent.parent / "resource" / "json"
+_RESOURCE_DIR = Path(__file__).resolve().parent.parent / "resource" / "theme" / "json"
 
 
 @lru_cache(maxsize=1)
