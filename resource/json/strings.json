@@ -56,7 +56,8 @@
     "empty_message": "登録済みデッキはありません",
     "toast_missing_name": "デッキ名を入力してください",
     "toast_duplicate": "同じ名前のデッキが既に登録されています",
-    "toast_registered": "デッキを登録しました"
+    "toast_registered": "デッキを登録しました",
+    "toast_deleted": "デッキを削除しました"
   },
   "season_registration": {
     "header_title": "シーズン情報登録",
@@ -65,12 +66,15 @@
     "empty_message": "登録済みシーズンはありません",
     "toast_missing_name": "シーズン名を入力してください",
     "toast_duplicate": "同じ名前のシーズンが既に登録されています",
-    "toast_registered": "シーズンを登録しました"
+    "toast_registered": "シーズンを登録しました",
+    "toast_deleted": "シーズンを削除しました"
   },
   "match_setup": {
     "header_title": "対戦データ入力開始",
     "count_hint": "対戦カウント初期値",
+    "count_label": "対戦カウント",
     "deck_button_default": "使用デッキを選択",
+    "deck_label": "使用デッキ",
     "start_button": "入力開始",
     "toast_no_decks": "まずはデッキを登録してください",
     "toast_select_deck": "使用デッキを選択してください",
@@ -85,6 +89,8 @@
     "keyword_hint": "キーワード (カンマ区切り)",
     "turn_prompt": "先攻/後攻を選択",
     "turn_options": ["先攻", "後攻"],
+    "opponent_menu_empty": "まだ登録されたキーワードはありません",
+    "opponent_manual_entry": "キーワードにないデッキ名を入力する",
     "result_prompt": "対戦結果を選択",
     "result_options": ["勝ち", "負け"],
     "record_button": "結果を記録",

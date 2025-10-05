@@ -275,6 +275,28 @@ class DatabaseManager:
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             raise DatabaseError("Failed to insert season") from exc
 
+    def delete_deck(self, name: str) -> None:
+        """デッキ定義を削除。存在しない場合は `DatabaseError` を送出。"""
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute("DELETE FROM decks WHERE name = ?", (name,))
+                if cursor.rowcount == 0:
+                    raise DatabaseError(f"Deck '{name}' not found")
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            raise DatabaseError("Failed to delete deck") from exc
+
+    def delete_season(self, name: str) -> None:
+        """シーズン定義を削除。存在しない場合は `DatabaseError` を送出。"""
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute("DELETE FROM seasons WHERE name = ?", (name,))
+                if cursor.rowcount == 0:
+                    raise DatabaseError(f"Season '{name}' not found")
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            raise DatabaseError("Failed to delete season") from exc
+
     def record_match(self, record: dict[str, object]) -> None:
         """対戦ログを 1 件保存します。
 
@@ -304,6 +326,21 @@ class DatabaseManager:
                 )
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             raise DatabaseError("Failed to record match") from exc
+
+    def fetch_opponent_decks(self) -> list[str]:
+        """対戦相手デッキ名を重複排除して取得（プルダウン候補用）。"""
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                SELECT DISTINCT TRIM(opponent_deck) AS deck
+                FROM matches
+                WHERE opponent_deck IS NOT NULL
+                  AND TRIM(opponent_deck) <> ''
+                ORDER BY deck COLLATE NOCASE
+                """
+            )
+            return [row["deck"] for row in cursor.fetchall() if row["deck"]]
 
     # ------------------------------------------------------------------
     # 高度なヘルパー
