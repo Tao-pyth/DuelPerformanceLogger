@@ -16,8 +16,8 @@
 - 文字列リソースは日本語中心で、UI のメニュー、トースト、ダイアログ文言を網羅する。
 
 ### Configuration Management / 設定管理
-- `function.config` が設定 (`resource/theme/config.json`) の読み書きを担当。`DEFAULT_CONFIG` を基点に JSON ファイルをマージし、欠損や破損時には自動復旧する。
-- UI モード（通常/配信向け）やデータベースの期待スキーマバージョン、バックアップ情報を保持。
+- `function.config` が設定 (`resource/theme/config.conf`) の読み取りを担当。`configparser` ベースで既定値 (`DEFAULT_CONFIG`) とマージし、ファイルは読み取り専用運用とする。
+- UI モードは DB メタデータ (`db_metadata`) で管理し、設定ファイルにはデータベースの期待スキーマバージョンなどの静的値のみを保持する。
 
 ### Database Layer / データベース層
 - `DatabaseManager` (`function.database`) は SQLite3 を操作する高水準ラッパー。自動でフォルダ作成、外部キー ON、`sqlite3.Row` を dict に変換して返却。
@@ -40,7 +40,7 @@
 
 ## Existing Assets / 既存リソース
 - `resource/theme/json/strings.json`: UI 用文言の定義。
-- `resource/theme/config.json`: アプリ設定のデフォルトファイル。
+- `resource/theme/config.conf`: アプリ設定のデフォルトファイル（INI 形式、読み取り専用）。
 - `resource/db/`: SQLite データベース保存先（`.gitkeep` で空ディレクトリを保持）。
 - `resource/log/`: アプリケーションログの出力先。
 - `resource/theme/font/`: 日本語フォント配置想定ディレクトリ（`main.py` で `mgenplus-1c-regular.ttf` を参照）。

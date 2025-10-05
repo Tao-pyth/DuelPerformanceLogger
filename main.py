@@ -32,7 +32,7 @@ from kivymd.toast import toast
 from kivymd.uix.dialog import MDDialog
 
 from function.resources import get_text
-from function.config import load_config, save_config, get_config_path
+from function.config import load_config, get_config_path
 from function import DatabaseManager, DatabaseError, DuplicateEntryError
 from function.logger import log_error
 
@@ -51,7 +51,7 @@ class _FallbackAppState:
 
     def reset(self):
         self.config = load_config()
-        self.ui_mode = self.config.get("ui", {}).get("mode", "normal")
+        self.ui_mode = "normal"
         self.decks = []
         self.seasons = []
         self.match_records = []
@@ -1189,9 +1189,10 @@ class MatchSetupScreen(BaseManagedScreen):
 
     def on_leave(self):
         app = get_app_state()
-        default_size = getattr(app, "default_window_size", None)
-        if default_size:
-            Window.size = default_size
+        if getattr(app, "ui_mode", "normal") != "broadcast":
+            default_size = getattr(app, "default_window_size", None)
+            if default_size:
+                Window.size = default_size
 
 
 
@@ -1204,6 +1205,7 @@ class MatchEntryScreen(BaseManagedScreen):
         self.result_buttons: list[MDRectangleFlatButton] = []
         self.last_record_data = None
         self._clock_event = None
+        self._active_mode = "normal"
 
         (
             self.normal_root,
@@ -1220,18 +1222,21 @@ class MatchEntryScreen(BaseManagedScreen):
             halign="center",
             font_style="H5",
         )
+        self._configure_label(self.clock_label, wrap=False)
 
         self.match_info_label = MDLabel(
             text="",
             halign="center",
             font_style="Subtitle1",
         )
+        self._configure_label(self.match_info_label)
 
         self.status_label = MDLabel(
             text=get_text("match_entry.status_default"),
             halign="center",
             font_style="H5",
         )
+        self._configure_label(self.status_label)
 
         self.opponent_field = MDTextField(
             hint_text=get_text("match_entry.opponent_hint"),
@@ -1270,10 +1275,12 @@ class MatchEntryScreen(BaseManagedScreen):
             text=get_text("match_entry.turn_prompt"),
             theme_text_color="Secondary",
         )
+        self._configure_label(self.turn_prompt_label)
         self.result_prompt_label = MDLabel(
             text=get_text("match_entry.result_prompt"),
             theme_text_color="Secondary",
         )
+        self._configure_label(self.result_prompt_label)
 
         self.turn_container_normal = MDBoxLayout(
             orientation="horizontal",
@@ -1394,6 +1401,7 @@ class MatchEntryScreen(BaseManagedScreen):
             text=get_text("match_entry.last_record_empty"),
             theme_text_color="Secondary",
         )
+        self._configure_label(self.last_record_label)
         card.add_widget(self.last_record_label)
 
         action_row = MDBoxLayout(spacing=dp(8), size_hint_y=None, height=dp(36))
@@ -1409,6 +1417,24 @@ class MatchEntryScreen(BaseManagedScreen):
         card.add_widget(action_row)
 
         return card
+
+    @staticmethod
+    def _configure_label(label: MDLabel, *, wrap: bool = True) -> None:
+        label.size_hint_y = None
+
+        if wrap:
+            def _update_text_size(instance, _value):
+                instance.text_size = (instance.width, None)
+
+            label.bind(width=_update_text_size)
+            _update_text_size(label, label.width)
+
+        label.bind(
+            texture_size=lambda instance, value: setattr(instance, "height", value[1])
+        )
+        if hasattr(label, "texture_update"):
+            label.texture_update()
+        label.height = getattr(label, "texture_size", (0, 0))[1]
 
     def _populate_toggle_buttons(
         self,
@@ -1473,7 +1499,7 @@ class MatchEntryScreen(BaseManagedScreen):
         )
         time_box = MDBoxLayout(
             orientation="vertical",
-            spacing=dp(4),
+            spacing=dp(12),
             size_hint=(1, None),
             height=dp(96),
         )
@@ -1483,11 +1509,13 @@ class MatchEntryScreen(BaseManagedScreen):
             halign="center",
             font_style="H5",
         )
+        self._configure_label(self.broadcast_clock_label, wrap=False)
         self.broadcast_match_info_label = MDLabel(
             text="",
             halign="center",
             font_style="Subtitle1",
         )
+        self._configure_label(self.broadcast_match_info_label)
         time_box.add_widget(self.broadcast_clock_label)
         time_box.add_widget(self.broadcast_match_info_label)
         self.broadcast_time_section.add_widget(time_box)
@@ -1516,6 +1544,7 @@ class MatchEntryScreen(BaseManagedScreen):
             halign="center",
             font_style="Subtitle1",
         )
+        self._configure_label(self.broadcast_status_label)
         self.broadcast_deck_section.add_widget(self.broadcast_status_label)
         layout.add_widget(self.broadcast_deck_section)
 
@@ -1702,10 +1731,12 @@ class MatchEntryScreen(BaseManagedScreen):
                 button.md_bg_color = (1, 1, 1, 1)
 
     def _apply_mode_layout(self, mode: str) -> None:
+        self._active_mode = mode
         if mode == "broadcast":
             self._show_broadcast_layout()
         else:
             self._show_normal_layout()
+        self._update_match_info_visibility(mode)
 
     def _show_broadcast_layout(self) -> None:
         if self.normal_root.parent:
@@ -1774,6 +1805,20 @@ class MatchEntryScreen(BaseManagedScreen):
             self.match_info_label.text = info_text
         if hasattr(self, "broadcast_match_info_label"):
             self.broadcast_match_info_label.text = info_text
+        self._update_match_info_visibility(self._active_mode)
+
+    def _update_match_info_visibility(self, mode: str) -> None:
+        if hasattr(self, "broadcast_match_info_label"):
+            if mode == "broadcast":
+                self.broadcast_match_info_label.opacity = 0
+                self.broadcast_match_info_label.height = 0
+            else:
+                self.broadcast_match_info_label.opacity = 1
+                if hasattr(self.broadcast_match_info_label, "texture_update"):
+                    self.broadcast_match_info_label.texture_update()
+                self.broadcast_match_info_label.height = (
+                    getattr(self.broadcast_match_info_label, "texture_size", (0, 0))[1]
+                )
 
     def set_turn_choice(self, choice):
         # 選択されたボタンのみアクティブ状態にする
@@ -1874,9 +1919,10 @@ class MatchEntryScreen(BaseManagedScreen):
     def on_leave(self):
         self._stop_clock()
         app = get_app_state()
-        default_size = getattr(app, "default_window_size", None)
-        if default_size:
-            Window.size = default_size
+        if getattr(app, "ui_mode", "normal") != "broadcast":
+            default_size = getattr(app, "default_window_size", None)
+            if default_size:
+                Window.size = default_size
 
     def _get_current_time_text(self) -> str:
         return datetime.now().strftime("%Y/%m/%d %H:%M:%S")
@@ -2086,22 +2132,26 @@ class SettingsScreen(BaseManagedScreen):
         )
         card.spacing = dp(12)
         card.bind(minimum_height=card.setter("height"))
-        card.add_widget(
-            MDLabel(
-                text=get_text("settings.db_section_title"),
-                font_style="Subtitle1",
-            )
+        title_label = MDLabel(
+            text=get_text("settings.db_section_title"),
+            font_style="Subtitle1",
+            halign="left",
         )
-        card.add_widget(
-            MDLabel(
-                text=get_text("settings.backup_description"),
-                theme_text_color="Secondary",
-            )
+        self._configure_label(title_label)
+        card.add_widget(title_label)
+        description_label = MDLabel(
+            text=get_text("settings.backup_description"),
+            theme_text_color="Secondary",
+            halign="left",
         )
+        self._configure_label(description_label)
+        card.add_widget(description_label)
         self.backup_info_label = MDLabel(
             text="",
             theme_text_color="Hint",
+            halign="left",
         )
+        self._configure_label(self.backup_info_label)
         card.add_widget(self.backup_info_label)
         backup_button = MDRaisedButton(
             text=get_text("settings.backup_button"),
@@ -2110,12 +2160,13 @@ class SettingsScreen(BaseManagedScreen):
         backup_button.size_hint = (1, None)
         backup_button.height = dp(48)
         card.add_widget(backup_button)
-        card.add_widget(
-            MDLabel(
-                text=get_text("settings.db_init_description"),
-                theme_text_color="Secondary",
-            )
+        init_description_label = MDLabel(
+            text=get_text("settings.db_init_description"),
+            theme_text_color="Secondary",
+            halign="left",
         )
+        self._configure_label(init_description_label)
+        card.add_widget(init_description_label)
         init_button = MDRaisedButton(
             text=get_text("settings.db_init_button"),
             on_press=lambda *_: self.open_db_init_dialog(),
@@ -2134,18 +2185,20 @@ class SettingsScreen(BaseManagedScreen):
         )
         card.spacing = dp(12)
         card.bind(minimum_height=card.setter("height"))
-        card.add_widget(
-            MDLabel(
-                text=get_text("settings.ui_section_title"),
-                font_style="Subtitle1",
-            )
+        title_label = MDLabel(
+            text=get_text("settings.ui_section_title"),
+            font_style="Subtitle1",
+            halign="left",
         )
-        card.add_widget(
-            MDLabel(
-                text=get_text("settings.ui_mode_description"),
-                theme_text_color="Secondary",
-            )
+        self._configure_label(title_label)
+        card.add_widget(title_label)
+        description_label = MDLabel(
+            text=get_text("settings.ui_mode_description"),
+            theme_text_color="Secondary",
+            halign="left",
         )
+        self._configure_label(description_label)
+        card.add_widget(description_label)
 
         button_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(48))
         modes = [
@@ -2171,15 +2224,31 @@ class SettingsScreen(BaseManagedScreen):
         card.add_widget(button_row)
         return card
 
+    @staticmethod
+    def _configure_label(label: MDLabel, *, wrap: bool = True) -> None:
+        label.size_hint_y = None
+
+        if wrap:
+            def _update_text_size(instance, _value):
+                instance.text_size = (instance.width, None)
+
+            label.bind(width=_update_text_size)
+            _update_text_size(label, label.width)
+
+        label.bind(
+            texture_size=lambda instance, value: setattr(instance, "height", value[1])
+        )
+        if hasattr(label, "texture_update"):
+            label.texture_update()
+        label.height = getattr(label, "texture_size", (0, 0))[1]
+
     def _set_ui_mode(self, mode: str) -> None:
         app = get_app_state()
         app.ui_mode = mode
-        if getattr(app, "config", None) is None:
-            app.config = load_config()
-        app.config.setdefault("ui", {})["mode"] = mode
-        save_config(app.config)
+        db = getattr(app, "db", None)
+        if db is not None:
+            db.set_ui_mode(mode)
         _fallback_app_state.ui_mode = mode
-        _fallback_app_state.config = dict(app.config)
         self._update_mode_buttons(mode)
         toast(get_text("settings.mode_updated"))
 
@@ -2198,8 +2267,10 @@ class SettingsScreen(BaseManagedScreen):
         if not self.backup_info_label:
             return
         app = get_app_state()
-        config = getattr(app, "config", None) or load_config()
-        last_backup = config.get("database", {}).get("last_backup")
+        db = getattr(app, "db", None)
+        last_backup = None
+        if db is not None:
+            last_backup = db.get_metadata("last_backup")
         if last_backup:
             self.backup_info_label.text = get_text("settings.last_backup").format(
                 path=last_backup
@@ -2220,11 +2291,7 @@ class SettingsScreen(BaseManagedScreen):
             toast(get_text("settings.backup_failure"))
             return
 
-        if getattr(app, "config", None) is None:
-            app.config = load_config()
-        app.config.setdefault("database", {})["last_backup"] = str(backup_path)
-        save_config(app.config)
-        _fallback_app_state.config = dict(app.config)
+        db.record_backup_path(backup_path)
         self._update_backup_label()
         toast(get_text("settings.backup_success"))
 
@@ -2294,15 +2361,19 @@ class DeckAnalyzerApp(MDApp):
     def build(self):
         self.theme_cls.primary_palette = "BlueGray"
         self.config = load_config()
-        self.ui_mode = self.config.get("ui", {}).get("mode", "normal")
         self.default_window_size = Window.size
 
         self.db = DatabaseManager()
         self.db.ensure_database()
+        self.ui_mode = self.db.get_ui_mode()
 
-        expected_version = self.config.get("database", {}).get(
+        expected_version_raw = self.config.get("database", {}).get(
             "expected_version", DatabaseManager.CURRENT_SCHEMA_VERSION
         )
+        try:
+            expected_version = int(expected_version_raw)
+        except (TypeError, ValueError):
+            expected_version = DatabaseManager.CURRENT_SCHEMA_VERSION
         current_version = self.db.get_schema_version()
         if current_version != expected_version:
             self.migration_result = self._handle_version_mismatch(
@@ -2355,8 +2426,7 @@ class DeckAnalyzerApp(MDApp):
             lines.append(
                 get_text("settings.db_migration_backup").format(path=str(backup_path))
             )
-            self.config.setdefault("database", {})["last_backup"] = str(backup_path)
-            save_config(self.config)
+            self.db.record_backup_path(backup_path)
 
             self.db.initialize_database()
             self.db.set_schema_version(expected_version)

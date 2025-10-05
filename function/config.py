@@ -2,56 +2,42 @@
 
 from __future__ import annotations
 
-import json
+import configparser
 from pathlib import Path
 from typing import Any, MutableMapping
 
 
-_CONFIG_PATH = Path(__file__).resolve().parent.parent / "resource" / "theme" / "config.json"
+_CONFIG_PATH = Path(__file__).resolve().parent.parent / "resource" / "theme" / "config.conf"
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "ui": {
-        "mode": "normal",  # normal | broadcast
-    },
     "database": {
         "expected_version": 3,
-        "last_backup": "",
     },
 }
-
-
-def _ensure_directory() -> None:
-    _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 def load_config() -> dict[str, Any]:
     """Return the persisted configuration or the defaults when missing."""
 
-    _ensure_directory()
-    if not _CONFIG_PATH.exists():
-        save_config(DEFAULT_CONFIG)
-        return dict(DEFAULT_CONFIG)
+    parser = configparser.ConfigParser()
+    if _CONFIG_PATH.exists():
+        parser.read(_CONFIG_PATH, encoding="utf-8")
 
-    with _CONFIG_PATH.open("r", encoding="utf-8") as stream:
-        try:
-            data = json.load(stream)
-        except json.JSONDecodeError:
-            # 破損時は安全側で既定値を使用
-            save_config(DEFAULT_CONFIG)
-            return dict(DEFAULT_CONFIG)
-
+    config = _configparser_to_dict(parser)
     merged = dict(DEFAULT_CONFIG)
-    _deep_update(merged, data)
+    _deep_update(merged, config)
     return merged
 
 
-def save_config(config: MutableMapping[str, Any]) -> None:
-    """Persist the given configuration mapping to disk."""
-
-    _ensure_directory()
-    with _CONFIG_PATH.open("w", encoding="utf-8") as stream:
-        json.dump(config, stream, ensure_ascii=False, indent=2, sort_keys=True)
+def _configparser_to_dict(parser: configparser.ConfigParser) -> dict[str, Any]:
+    data: dict[str, Any] = {}
+    for section in parser.sections():
+        items = {}
+        for key, value in parser.items(section):
+            items[key] = value
+        data[section] = items
+    return data
 
 
 def _deep_update(base: MutableMapping[str, Any], updates: MutableMapping[str, Any]) -> None:
