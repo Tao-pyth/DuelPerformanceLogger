@@ -62,6 +62,7 @@
   },
   "season_registration": {
     "header_title": "シーズン情報登録",
+    "list_header_title": "シーズン一覧",
     "name_hint": "シーズン名",
     "description_hint": "シーズン説明",
     "start_date_hint": "開始日 (例: 2024-04-01)",
@@ -79,7 +80,9 @@
     "toast_missing_name": "シーズン名を入力してください",
     "toast_duplicate": "同じ名前のシーズンが既に登録されています",
     "toast_registered": "シーズンを登録しました",
-    "toast_deleted": "シーズンを削除しました"
+    "toast_deleted": "シーズンを削除しました",
+    "add_button": "新しいシーズンを登録する",
+    "back_to_list": "一覧に戻る"
   },
   "match_setup": {
     "header_title": "対戦データ入力開始",
@@ -100,11 +103,18 @@
     "opponent_hint": "対戦相手使用デッキ",
     "keyword_hint": "キーワード (カンマ区切り)",
     "turn_prompt": "先攻/後攻を選択",
-    "turn_options": ["先攻", "後攻"],
+    "turn_options": [
+      {"label": "先攻", "value": true},
+      {"label": "後攻", "value": false}
+    ],
     "opponent_menu_empty": "まだ登録されたキーワードはありません",
     "opponent_manual_entry": "キーワードにないデッキ名を入力する",
     "result_prompt": "対戦結果を選択",
-    "result_options": ["勝ち", "負け"],
+    "result_options": [
+      {"label": "勝ち", "value": 1},
+      {"label": "引き分け", "value": 0},
+      {"label": "負け", "value": -1}
+    ],
     "record_button": "結果を記録",
     "back_button": "開始画面に戻る",
     "status_missing_setup": "開始画面から初期情報を設定してください",
@@ -130,7 +140,7 @@
     "filter_label": "絞り込み: {deck_name}",
     "filter_all": "すべてのデッキ",
     "no_data_for_deck": "{deck_name} のデータはまだありません",
-    "summary_template": "{header}\\n対戦数: {total}\\n勝利: {wins}\\n敗北: {losses}\\n勝率: {win_rate:.1f}%"
+    "summary_template": "{header}\\n対戦数: {total}\\n勝利: {wins}\\n引き分け: {draws}\\n敗北: {losses}\\n勝率: {win_rate:.1f}%"
   },
   "settings": {
     "header_title": "設定",
