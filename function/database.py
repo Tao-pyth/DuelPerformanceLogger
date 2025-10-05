@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Iterator, Optional
 
 
 class DatabaseError(RuntimeError):
@@ -114,12 +116,18 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     match_no INTEGER NOT NULL,
                     deck_name TEXT NOT NULL,
-                    turn TEXT NOT NULL,
+                    turn TEXT NOT NULL CHECK (turn IN ('first', 'second')),
                     opponent_deck TEXT,
                     keywords TEXT,
-                    result TEXT NOT NULL,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    result TEXT NOT NULL CHECK (result IN ('win', 'lose', 'draw')),
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
                 );
+
+                CREATE INDEX idx_matches_deck_created_at
+                    ON matches(deck_name, created_at DESC);
+
+                CREATE INDEX idx_matches_match_no
+                    ON matches(match_no);
                 """
             )
 
@@ -171,6 +179,8 @@ class DatabaseManager:
                 # Keywords are stored as JSON for simplicity.
                 keywords_raw = row["keywords"]
                 keywords = json.loads(keywords_raw) if keywords_raw else []
+                created_at_raw = row["created_at"]
+                created_at = self._format_timestamp(created_at_raw)
                 record = {
                     "match_no": row["match_no"],
                     "deck_name": row["deck_name"],
@@ -178,7 +188,7 @@ class DatabaseManager:
                     "opponent_deck": row["opponent_deck"] or "",
                     "keywords": keywords,
                     "result": row["result"],
-                    "created_at": row["created_at"],
+                    "created_at": created_at,
                 }
                 records.append(record)
             return records
@@ -208,6 +218,8 @@ class DatabaseManager:
 
             keywords_raw = row["keywords"]
             keywords = json.loads(keywords_raw) if keywords_raw else []
+            created_at_raw = row["created_at"]
+            created_at = self._format_timestamp(created_at_raw)
             return {
                 "match_no": row["match_no"],
                 "deck_name": row["deck_name"],
@@ -215,7 +227,7 @@ class DatabaseManager:
                 "opponent_deck": row["opponent_deck"] or "",
                 "keywords": keywords,
                 "result": row["result"],
-                "created_at": row["created_at"],
+                "created_at": created_at,
             }
 
     def get_next_match_number(self, deck_name: Optional[str] = None) -> int:
@@ -275,7 +287,7 @@ class DatabaseManager:
         ``keywords`` are stored when present.
         """
 
-        keywords = record.get("keywords", [])
+        keywords = record.get("keywords") or []
         keywords_json = json.dumps(list(keywords), ensure_ascii=False)
 
         try:
@@ -298,3 +310,39 @@ class DatabaseManager:
                 )
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             raise DatabaseError("Failed to record match") from exc
+
+    # ------------------------------------------------------------------
+    # Advanced helpers
+    # ------------------------------------------------------------------
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """Provide a managed database transaction.
+
+        This utility ensures that the wrapped block runs within a single
+        transaction.  Any error causes the transaction to roll back while
+        successful execution commits automatically.
+        """
+
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            connection.rollback()
+            raise DatabaseError("Database transaction failed") from exc
+        finally:
+            connection.close()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _format_timestamp(value: object) -> str:
+        """Convert a SQLite timestamp value into an ISO formatted string."""
+
+        try:
+            timestamp = int(value)
+        except (TypeError, ValueError):
+            return ""
+
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
