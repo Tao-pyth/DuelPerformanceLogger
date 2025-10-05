@@ -952,11 +952,18 @@ class MatchEntryScreen(BaseManagedScreen):
         self.turn_buttons = []
         self.result_buttons = []
         self.last_record_data = None
+        self._clock_event = None
 
         header = build_header(
             get_text("match_entry.header_title"),
             lambda: self.change_screen("match_setup"),
             lambda: self.change_screen("menu"),
+        )
+
+        self.clock_label = MDLabel(
+            text=self._get_current_time_text(),
+            halign="center",
+            font_style="H4",
         )
 
         self.status_label = MDLabel(
@@ -992,6 +999,7 @@ class MatchEntryScreen(BaseManagedScreen):
         )
         content.bind(minimum_height=content.setter("height"))
 
+        content.add_widget(self.clock_label)
         content.add_widget(self.status_label)
         content.add_widget(self._build_last_record_card())
         content.add_widget(
@@ -1317,6 +1325,7 @@ class MatchEntryScreen(BaseManagedScreen):
                 Window.size = default_size
 
     def on_pre_enter(self):
+        self._start_clock()
         app = get_app_state()
         mode = getattr(app, "ui_mode", "normal")
         self._apply_mode_layout(mode)
@@ -1416,10 +1425,28 @@ class MatchEntryScreen(BaseManagedScreen):
             self.opponent_field.focus = True
 
     def on_leave(self):
+        self._stop_clock()
         app = get_app_state()
         default_size = getattr(app, "default_window_size", None)
         if default_size:
             Window.size = default_size
+
+    def _get_current_time_text(self) -> str:
+        return datetime.now().strftime("%H:%M:%S")
+
+    def _update_clock(self, *_):
+        if hasattr(self, "clock_label"):
+            self.clock_label.text = self._get_current_time_text()
+
+    def _start_clock(self) -> None:
+        if self._clock_event is None:
+            self._update_clock()
+            self._clock_event = Clock.schedule_interval(self._update_clock, 1)
+
+    def _stop_clock(self) -> None:
+        if self._clock_event is not None:
+            self._clock_event.cancel()
+            self._clock_event = None
 
 
 class StatsScreen(BaseManagedScreen):
