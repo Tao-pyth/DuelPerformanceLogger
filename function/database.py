@@ -1,13 +1,21 @@
-"""High-level helper around the SQLite database used by the app.
+"""SQLite データベース管理モジュール（DuelPerformanceLogger 用）
 
-The application stores user generated data – such as registered decks,
-season notes and detailed match logs – inside a single SQLite file located
-under :mod:`resource/db`.  This module concentrates all access to that file
-so that the rest of the UI can stay focused on presentation logic.
+このモジュールは、アプリで利用する SQLite データベースへのアクセスを一元化します。
+UI 層では辞書（dict）ベースのデータ構造だけを扱えるよう抽象化し、
+永続化の詳細（SQL・Row など）を極力意識せずに使える設計としています。
 
-The manager intentionally exposes simple dictionary based structures instead
-of raw SQLite rows.  That keeps the calling code free from persistence
-details while still allowing the UI to display the stored information.
+主な保管対象:
+- デッキ情報（`decks`）
+- シーズン情報（`seasons`）
+- 対戦ログ（`matches`）
+
+設計のポイント:
+- 外部キー制約を常時有効化（`PRAGMA foreign_keys = ON`）。
+- 取得結果は `sqlite3.Row` → dict 化して返却。
+- キーワードは JSON 文字列で保存し、取得時に Python のリストへ復元。
+- タイムスタンプは **UNIX エポック秒（INTEGER）** を保存し、表示時に ISO 文字列へ変換。
+- 最低限の **CHECK 制約**（`turn`, `result`）と **INDEX**（検索高速化）を付与。
+- トランザクション・コンテキストマネージャを提供。
 """
 
 from __future__ import annotations
@@ -21,75 +29,72 @@ from typing import Iterable, Iterator, Optional
 
 
 class DatabaseError(RuntimeError):
-    """Base error that signals an unexpected database failure."""
+    """DB 操作時の想定外エラーを表す基底例外。"""
 
 
 class DuplicateEntryError(DatabaseError):
-    """Raised when a unique constraint prevents inserting a record."""
+    """一意制約違反（同名レコードの重複登録など）を表す例外。"""
 
 
 class DatabaseManager:
-    """Utility wrapper around an on-disk SQLite database file.
+    """アプリ用 SQLite データベースのユーティリティラッパー。
 
     Parameters
     ----------
-    db_path:
-        Optional custom path to the SQLite database file.  When omitted the
-        database is placed inside ``resource/db`` with the default file name
-        ``duel_performance.sqlite3``.
+    db_path: Optional[Path | str]
+        データベースファイルのパス。未指定時は ``resource/db/duel_performance.sqlite3`` を使用。
+        ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
     def __init__(self, db_path: Optional[Path | str] = None) -> None:
+        # プロジェクトルートからの相対で DB 既定置き場を解決
         base_dir = Path(__file__).resolve().parent.parent / "resource" / "db"
         if db_path is None:
             db_path = base_dir / "duel_performance.sqlite3"
         else:
             db_path = Path(db_path)
             if db_path.is_dir():
-                # Allow callers to pass only the directory and rely on the
-                # default file name.
+                # ディレクトリだけ渡された時は既定ファイル名を付与
                 db_path = db_path / "duel_performance.sqlite3"
 
         self._db_path = db_path
+        # 保存先ディレクトリを事前に作成（既にあれば何もしない）
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
-    # Low level helpers
+    # 低レベルヘルパー（接続生成）
     # ------------------------------------------------------------------
     def _connect(self) -> sqlite3.Connection:
-        """Return a SQLite connection with sensible defaults.
+        """SQLite コネクションを生成して返します。
 
-        Each connection enables foreign key constraints and configures the
-        row factory so results can be accessed as dictionaries.
+        - 行ファクトリを `sqlite3.Row` に設定（列名アクセスを可能に）
+        - 外部キー制約を ON
+        - 呼び出し側は基本的に `with` 文で使用してください
         """
-
         connection = sqlite3.connect(self._db_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON;")
         return connection
 
     # ------------------------------------------------------------------
-    # Database lifecycle helpers
+    # DB ライフサイクル管理
     # ------------------------------------------------------------------
     @property
     def db_path(self) -> Path:
-        """Expose the current database file path for informational purposes."""
-
+        """現在使用している DB ファイルのパス（情報表示用）。"""
         return self._db_path
 
     def ensure_database(self) -> None:
-        """Create the database file with all tables when it does not exist."""
-
+        """DB ファイルが存在しない場合にスキーマを作成します。"""
         if not self._db_path.exists():
             self.initialize_database()
 
     def initialize_database(self) -> None:
-        """Re-create the database file from scratch.
+        """DB を初期化（既存があれば削除→再作成）。
 
-        Existing files are removed before the new empty schema is created.  The
-        method is idempotent and can safely be called multiple times.
+        - 何度呼んでも安全（冪等）な設計です。
+        - **既存ファイルは削除** されるためデータは消去されます（運用時は注意）。
         """
-
         if self._db_path.exists():
             self._db_path.unlink()
 
@@ -120,23 +125,25 @@ class DatabaseManager:
                     opponent_deck TEXT,
                     keywords TEXT,
                     result TEXT NOT NULL CHECK (result IN ('win', 'lose', 'draw')),
+                    -- 生成時刻は UTC のエポック秒
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
                 );
 
+                -- 検索高速化：デッキ×作成時刻の複合インデックス
                 CREATE INDEX idx_matches_deck_created_at
                     ON matches(deck_name, created_at DESC);
 
+                -- 対戦番号へのインデックス
                 CREATE INDEX idx_matches_match_no
                     ON matches(match_no);
                 """
             )
 
     # ------------------------------------------------------------------
-    # Data retrieval helpers
+    # 取得系ヘルパー
     # ------------------------------------------------------------------
     def fetch_decks(self) -> list[dict[str, str]]:
-        """Return all registered decks sorted by name."""
-
+        """登録済みデッキを名称順（大文字小文字無視）で返却。"""
         with self._connect() as connection:
             cursor = connection.execute(
                 "SELECT name, description FROM decks ORDER BY name COLLATE NOCASE"
@@ -144,8 +151,7 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
 
     def fetch_seasons(self) -> list[dict[str, str]]:
-        """Return the stored season definitions sorted by name."""
-
+        """登録済みシーズンを名称順で返却。"""
         with self._connect() as connection:
             cursor = connection.execute(
                 "SELECT name, description FROM seasons ORDER BY name COLLATE NOCASE"
@@ -153,14 +159,13 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
 
     def fetch_matches(self, deck_name: Optional[str] = None) -> list[dict[str, object]]:
-        """Return stored match logs.
+        """対戦ログを返却（デッキ名で絞り込み可能）。
 
         Parameters
         ----------
-        deck_name:
-            When provided, only matches for the specified deck are returned.
+        deck_name: Optional[str]
+            指定された場合、そのデッキの対戦のみを返します。
         """
-
         query = (
             "SELECT match_no, deck_name, turn, opponent_deck, keywords, result, created_at"
             " FROM matches"
@@ -170,35 +175,31 @@ class DatabaseManager:
             query += " WHERE deck_name = ?"
             params = (deck_name,)
 
+        # 生成時刻の昇順 → 同時刻の場合は id 昇順
         query += " ORDER BY created_at ASC, id ASC"
 
         with self._connect() as connection:
             cursor = connection.execute(query, tuple(params))
             records: list[dict[str, object]] = []
             for row in cursor.fetchall():
-                # Keywords are stored as JSON for simplicity.
                 keywords_raw = row["keywords"]
                 keywords = json.loads(keywords_raw) if keywords_raw else []
-                created_at_raw = row["created_at"]
-                created_at = self._format_timestamp(created_at_raw)
-                record = {
-                    "match_no": row["match_no"],
-                    "deck_name": row["deck_name"],
-                    "turn": row["turn"],
-                    "opponent_deck": row["opponent_deck"] or "",
-                    "keywords": keywords,
-                    "result": row["result"],
-                    "created_at": created_at,
-                }
-                records.append(record)
+                created_at = self._format_timestamp(row["created_at"])  # ISO 8601
+                records.append(
+                    {
+                        "match_no": row["match_no"],
+                        "deck_name": row["deck_name"],
+                        "turn": row["turn"],
+                        "opponent_deck": row["opponent_deck"] or "",
+                        "keywords": keywords,
+                        "result": row["result"],
+                        "created_at": created_at,
+                    }
+                )
             return records
 
     def fetch_last_match(self, deck_name: Optional[str] = None) -> Optional[dict[str, object]]:
-        """Return the most recently recorded match.
-
-        When *deck_name* is supplied the search is scoped to that deck.
-        """
-
+        """最新の対戦ログを 1 件返却（デッキ名で絞り込み可能）。"""
         query = (
             "SELECT match_no, deck_name, turn, opponent_deck, keywords, result, created_at"
             " FROM matches"
@@ -208,6 +209,7 @@ class DatabaseManager:
             query += " WHERE deck_name = ?"
             params = (deck_name,)
 
+        # 新しい順に 1 件
         query += " ORDER BY created_at DESC, id DESC LIMIT 1"
 
         with self._connect() as connection:
@@ -218,8 +220,7 @@ class DatabaseManager:
 
             keywords_raw = row["keywords"]
             keywords = json.loads(keywords_raw) if keywords_raw else []
-            created_at_raw = row["created_at"]
-            created_at = self._format_timestamp(created_at_raw)
+            created_at = self._format_timestamp(row["created_at"])  # ISO 8601
             return {
                 "match_no": row["match_no"],
                 "deck_name": row["deck_name"],
@@ -231,12 +232,11 @@ class DatabaseManager:
             }
 
     def get_next_match_number(self, deck_name: Optional[str] = None) -> int:
-        """Return the next match number for the given deck.
+        """指定デッキの次の対戦番号を返却。
 
-        The helper inspects the latest match entry and adds one to its
-        ``match_no``.  When the database is empty the value ``1`` is returned.
+        直近の `match_no` を見て +1 した値を返します。DB が空の場合は 1。
+        数値化に失敗した場合も安全側で 1 を返すフォールバックを実装しています。
         """
-
         last_match = self.fetch_last_match(deck_name)
         if last_match is None:
             return 1
@@ -244,16 +244,13 @@ class DatabaseManager:
         try:
             return int(last_no) + 1
         except (TypeError, ValueError):
-            # When the value was stored as text and is not numeric we fall
-            # back to a safe default.
             return 1
 
     # ------------------------------------------------------------------
-    # Data mutation helpers
+    # 追加・更新系ヘルパー
     # ------------------------------------------------------------------
     def add_deck(self, name: str, description: str = "") -> None:
-        """Insert a new deck definition."""
-
+        """デッキ定義を追加。重複時は `DuplicateEntryError`。"""
         try:
             with self._connect() as connection:
                 connection.execute(
@@ -266,8 +263,7 @@ class DatabaseManager:
             raise DatabaseError("Failed to insert deck") from exc
 
     def add_season(self, name: str, description: str = "") -> None:
-        """Insert a season definition."""
-
+        """シーズン定義を追加。重複時は `DuplicateEntryError`。"""
         try:
             with self._connect() as connection:
                 connection.execute(
@@ -280,16 +276,14 @@ class DatabaseManager:
             raise DatabaseError("Failed to insert season") from exc
 
     def record_match(self, record: dict[str, object]) -> None:
-        """Persist a match record.
+        """対戦ログを 1 件保存します。
 
-        ``record`` must at least contain the keys ``match_no``, ``deck_name``,
-        ``turn`` and ``result``.  Optional keys such as ``opponent_deck`` and
-        ``keywords`` are stored when present.
+        必須キー: ``match_no``, ``deck_name``, ``turn``, ``result``
+        任意キー: ``opponent_deck``, ``keywords``（イテラブル可）
+        ``keywords`` は JSON 文字列へシリアライズして保存します。
         """
-
         keywords = record.get("keywords") or []
         keywords_json = json.dumps(list(keywords), ensure_ascii=False)
-
         try:
             with self._connect() as connection:
                 connection.execute(
@@ -312,17 +306,19 @@ class DatabaseManager:
             raise DatabaseError("Failed to record match") from exc
 
     # ------------------------------------------------------------------
-    # Advanced helpers
+    # 高度なヘルパー
     # ------------------------------------------------------------------
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        """Provide a managed database transaction.
+        """トランザクションを伴う安全な実行ブロックを提供します。
 
-        This utility ensures that the wrapped block runs within a single
-        transaction.  Any error causes the transaction to roll back while
-        successful execution commits automatically.
+        利用例:
+        >>> with db.transaction() as con:
+        ...     con.execute(...)
+        ...     con.execute(...)
+
+        例外発生時は自動でロールバック、正常終了時はコミットします。
         """
-
         connection = self._connect()
         try:
             yield connection
@@ -334,15 +330,22 @@ class DatabaseManager:
             connection.close()
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # 内部ユーティリティ
     # ------------------------------------------------------------------
     @staticmethod
     def _format_timestamp(value: object) -> str:
-        """Convert a SQLite timestamp value into an ISO formatted string."""
-
+        """SQLite に保存されたエポック秒（INTEGER）を ISO 8601 文字列へ変換。"""
         try:
-            timestamp = int(value)
+            ts = int(value)
         except (TypeError, ValueError):
             return ""
+        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+
+# 将来の拡張メモ
+# - FK 強化: matches.deck_name → decks.id（数値 FK）へ移行し、ON UPDATE/DELETE CASCADE を検討
+# - PRAGMA 設定: WAL モード（journal_mode=WAL）や synchronous=NORMAL を運用に応じて設定
+# - user_version: スキーマバージョン管理で移行を明確化
+# - 型安全: record 引数の TypedDict/Dataclass 化、Enum 的表現（turn/result）など
+# - エクスポート: CSV/JSON ダンプ & インポートユーティリティ
+# - 統計情報: 勝率計算やターン別集計などの集計クエリヘルパー
