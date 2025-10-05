@@ -242,7 +242,7 @@ class MenuScreen(MDScreen):
         header.add_widget(
             MDLabel(
                 text=title,
-                font_style="H6",
+                font_style="H5",
                 theme_text_color="Primary",
             )
         )
