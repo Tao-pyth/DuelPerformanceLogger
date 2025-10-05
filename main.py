@@ -18,8 +18,10 @@ from kivy.metrics import dp
 from kivy.core.text import LabelBase, DEFAULT_FONT
 from kivy.core.window import Window
 from kivymd.toast import toast
+from kivymd.uix.dialog import MDDialog
 
 from function.resources import get_text
+from function import DatabaseManager, DatabaseError, DuplicateEntryError
 
 # 日本語フォント設定
 LabelBase.register(DEFAULT_FONT, r'resource\\theme\\font\\mgenplus-1c-regular.ttf')
@@ -38,6 +40,7 @@ class _FallbackAppState:
         self.match_records = []
         self.current_match_settings: Optional[dict[str, Any]] = None
         self.current_match_count = 0
+        self.db: Optional[DatabaseManager] = None
 
 
 _fallback_app_state = _FallbackAppState()
@@ -337,14 +340,23 @@ class DeckRegistrationScreen(BaseManagedScreen):
             toast(get_text("deck_registration.toast_missing_name"))
             return
 
-        # 既存データとの重複チェック
         app = get_app_state()
-        if any(deck["name"] == name for deck in app.decks):
-            toast(get_text("deck_registration.toast_duplicate"))
+        db = getattr(app, "db", None)
+
+        if db is None:
+            toast(get_text("common.db_error"))
             return
 
-        # 問題がなければデータを追加し、入力欄を初期化
-        app.decks.append({"name": name, "description": description})
+        try:
+            db.add_deck(name, description)
+        except DuplicateEntryError:
+            toast(get_text("deck_registration.toast_duplicate"))
+            return
+        except DatabaseError:
+            toast(get_text("common.db_error"))
+            return
+
+        app.decks = db.fetch_decks()
         toast(get_text("deck_registration.toast_registered"))
         self.name_field.text = ""
         self.description_field.text = ""
@@ -357,6 +369,9 @@ class DeckRegistrationScreen(BaseManagedScreen):
     def update_deck_list(self):
         # アプリ全体のデッキ情報を参照して表示を更新
         app = get_app_state()
+        db = getattr(app, "db", None)
+        if db is not None:
+            app.decks = db.fetch_decks()
         if not app.decks:
             self.deck_list_label.text = get_text("deck_registration.empty_message")
         else:
@@ -424,14 +439,22 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             toast(get_text("season_registration.toast_missing_name"))
             return
 
-        # 既存シーズンと名前が重ならないかチェック
         app = get_app_state()
-        if any(season["name"] == name for season in app.seasons):
-            toast(get_text("season_registration.toast_duplicate"))
+        db = getattr(app, "db", None)
+        if db is None:
+            toast(get_text("common.db_error"))
             return
 
-        # 問題がなければ情報を保存し、表示を更新
-        app.seasons.append({"name": name, "description": description})
+        try:
+            db.add_season(name, description)
+        except DuplicateEntryError:
+            toast(get_text("season_registration.toast_duplicate"))
+            return
+        except DatabaseError:
+            toast(get_text("common.db_error"))
+            return
+
+        app.seasons = db.fetch_seasons()
         toast(get_text("season_registration.toast_registered"))
         self.name_field.text = ""
         self.description_field.text = ""
@@ -444,6 +467,9 @@ class SeasonRegistrationScreen(BaseManagedScreen):
     def update_season_list(self):
         # 保持しているシーズン情報を整形し、利用者へ提示
         app = get_app_state()
+        db = getattr(app, "db", None)
+        if db is not None:
+            app.seasons = db.fetch_seasons()
         if not app.seasons:
             self.season_list_label.text = get_text("season_registration.empty_message")
         else:
@@ -504,6 +530,9 @@ class MatchSetupScreen(BaseManagedScreen):
     def open_deck_menu(self):
         # 登録済みデッキから選択肢を生成しドロップダウンで表示
         app = get_app_state()
+        db = getattr(app, "db", None)
+        if db is not None:
+            app.decks = db.fetch_decks()
         if not app.decks:
             toast(get_text("match_setup.toast_no_decks"))
             return
@@ -529,6 +558,11 @@ class MatchSetupScreen(BaseManagedScreen):
         self.deck_button.text = get_text("match_setup.selected_deck_label").format(
             deck_name=name
         )
+        app = get_app_state()
+        db = getattr(app, "db", None)
+        if db is not None:
+            next_no = db.get_next_match_number(name)
+            self.match_count_field.text = str(next_no)
         if self.deck_menu:
             self.deck_menu.dismiss()
 
@@ -563,11 +597,18 @@ class MatchEntryScreen(BaseManagedScreen):
         self.result_choice = None
         self.turn_buttons = []
         self.result_buttons = []
+        self.last_record_data = None
+
+        header = build_header(
+            get_text("match_entry.header_title"),
+            lambda: self.change_screen("match_setup"),
+        )
 
         self.status_label = MDLabel(
             text=get_text("match_entry.status_default"),
             halign="center",
         )
+        
         self.opponent_field = MDTextField(
             hint_text=get_text("match_entry.opponent_hint")
         )
@@ -576,56 +617,160 @@ class MatchEntryScreen(BaseManagedScreen):
             multiline=True,
         )
 
-        layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
-        layout.add_widget(
-            build_header(
-                get_text("match_entry.header_title"),
-                lambda: self.change_screen("match_setup"),
-            )
+        root_layout = MDBoxLayout(orientation="vertical")
+        root_layout.add_widget(header)
+
+        scroll_view = ScrollView()
+        content = MDBoxLayout(
+            orientation="vertical",
+            padding=(dp(24), dp(24), dp(24), dp(24)),
+            spacing=dp(16),
+            size_hint_y=None,
         )
-        layout.add_widget(self.status_label)
-        layout.add_widget(
+        content.bind(minimum_height=content.setter("height"))
+
+        content.add_widget(self.status_label)
+        content.add_widget(self._build_last_record_card())
+        content.add_widget(
             MDLabel(
                 text=get_text("match_entry.turn_prompt"),
                 theme_text_color="Secondary",
             )
         )
-        layout.add_widget(
+        content.add_widget(
             self._build_toggle_row(
                 get_text("match_entry.turn_options"),
                 self.set_turn_choice,
                 "turn_buttons",
             )
         )
-        layout.add_widget(self.opponent_field)
-        layout.add_widget(self.keyword_field)
-        layout.add_widget(
+        content.add_widget(self.opponent_field)
+        content.add_widget(self.keyword_field)
+        content.add_widget(
             MDLabel(
                 text=get_text("match_entry.result_prompt"),
                 theme_text_color="Secondary",
             )
         )
-        layout.add_widget(
+        content.add_widget(
             self._build_toggle_row(
                 get_text("match_entry.result_options"),
                 self.set_result_choice,
                 "result_buttons",
             )
         )
-        layout.add_widget(
+
+        quick_actions = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(40))
+        clear_button = MDFlatButton(
+            text=get_text("match_entry.clear_button"),
+            on_press=lambda *_: self.reset_inputs(focus_opponent=True),
+        )
+        clear_button.size_hint = (None, None)
+        clear_button.height = dp(40)
+        quick_actions.add_widget(clear_button)
+        quick_actions.add_widget(Widget())
+        content.add_widget(quick_actions)
+
+        content.add_widget(
             MDRaisedButton(
                 text=get_text("match_entry.record_button"),
                 on_press=lambda *_: self.submit_match(),
             )
         )
-        layout.add_widget(
+        content.add_widget(
             MDFlatButton(
                 text=get_text("match_entry.back_button"),
                 on_press=lambda *_: self.change_screen("match_setup"),
             )
         )
 
-        self.add_widget(layout)
+        scroll_view.add_widget(content)
+        root_layout.add_widget(scroll_view)
+
+        self.add_widget(root_layout)
+
+    def _build_last_record_card(self):
+        """Create a summary card showing the latest saved match."""
+
+        card = MDCard(
+            orientation="vertical",
+            padding=(dp(16), dp(16), dp(16), dp(16)),
+            size_hint=(1, None),
+            radius=[16, 16, 16, 16],
+        )
+        card.spacing = dp(12)
+
+        card.add_widget(
+            MDLabel(
+                text=get_text("match_entry.last_record_title"),
+                font_style="Subtitle1",
+            )
+        )
+
+        self.last_record_label = MDLabel(
+            text=get_text("match_entry.last_record_empty"),
+            theme_text_color="Secondary",
+        )
+        card.add_widget(self.last_record_label)
+
+        action_row = MDBoxLayout(spacing=dp(8), size_hint_y=None, height=dp(36))
+        action_row.add_widget(Widget())
+        self.copy_last_button = MDFlatButton(
+            text=get_text("match_entry.copy_last_button"),
+            on_press=lambda *_: self.copy_last_record(),
+            disabled=True,
+        )
+        self.copy_last_button.size_hint = (None, None)
+        self.copy_last_button.height = dp(36)
+        action_row.add_widget(self.copy_last_button)
+        card.add_widget(action_row)
+
+        return card
+
+    def _load_last_record(self):
+        """Fetch and display the most recent record for the selected deck."""
+
+        app = get_app_state()
+        settings = getattr(app, "current_match_settings", None)
+        db = getattr(app, "db", None)
+
+        if db is None or not settings:
+            self.last_record_data = None
+            self.last_record_label.text = get_text("match_entry.last_record_empty")
+            if hasattr(self, "copy_last_button"):
+                self.copy_last_button.disabled = True
+            return
+
+        last_record = db.fetch_last_match(settings["deck_name"])
+        if not last_record:
+            self.last_record_data = None
+            self.last_record_label.text = get_text("match_entry.last_record_empty")
+            self.copy_last_button.disabled = True
+            return
+
+        self.last_record_data = last_record
+        keywords = last_record.get("keywords") or []
+        keywords_text = ", ".join(keywords) if keywords else get_text("match_entry.last_record_no_keywords")
+        opponent_text = last_record.get("opponent_deck") or get_text("match_entry.last_record_no_opponent")
+        self.last_record_label.text = get_text("match_entry.last_record_template").format(
+            match_no=last_record.get("match_no"),
+            turn=last_record.get("turn"),
+            result=last_record.get("result"),
+            opponent=opponent_text,
+            keywords=keywords_text,
+        )
+        self.copy_last_button.disabled = False
+
+    def copy_last_record(self):
+        """Copy the previously stored opponent information into the fields."""
+
+        if not self.last_record_data:
+            return
+
+        self.opponent_field.text = self.last_record_data.get("opponent_deck", "")
+        keywords = self.last_record_data.get("keywords") or []
+        self.keyword_field.text = ", ".join(keywords)
+        toast(get_text("match_entry.toast_copied_previous"))
 
     def _build_toggle_row(self, options, callback, attr_name):
         """指定した選択肢をトグル可能なボタン行として構築する."""
@@ -673,6 +818,11 @@ class MatchEntryScreen(BaseManagedScreen):
         if not settings:
             # 初期設定がなければ入力を促すメッセージを表示
             self.status_label.text = get_text("match_entry.status_missing_setup")
+            self.last_record_data = None
+            if hasattr(self, "last_record_label"):
+                self.last_record_label.text = get_text("match_entry.last_record_empty")
+            if hasattr(self, "copy_last_button"):
+                self.copy_last_button.disabled = True
             return
 
         # 最新の対戦カウントと使用デッキをステータスに反映
@@ -680,7 +830,8 @@ class MatchEntryScreen(BaseManagedScreen):
             count=app.current_match_count,
             deck_name=settings["deck_name"],
         )
-        self.reset_inputs()
+        self.reset_inputs(focus_opponent=True)
+        self._load_last_record()
 
     def set_turn_choice(self, choice):
         # 選択されたボタンのみアクティブ状態にする
@@ -709,6 +860,11 @@ class MatchEntryScreen(BaseManagedScreen):
             return
 
         # 入力内容を一つの辞書にまとめて保存
+        db = getattr(app, "db", None)
+        if db is None:
+            toast(get_text("common.db_error"))
+            return
+
         record = {
             "match_no": app.current_match_count,
             "deck_name": settings["deck_name"],
@@ -717,18 +873,27 @@ class MatchEntryScreen(BaseManagedScreen):
             "keywords": [kw.strip() for kw in self.keyword_field.text.split(",") if kw.strip()],
             "result": self.result_choice,
         }
-        app.match_records.append(record)
+
+        try:
+            db.record_match(record)
+        except DatabaseError:
+            toast(get_text("common.db_error"))
+            return
+
+        app.match_records = db.fetch_matches()
 
         # 試合数をカウントアップし、画面表示と入力欄を更新
         app.current_match_count += 1
+        settings["count"] = app.current_match_count
         self.status_label.text = get_text("match_entry.status_summary").format(
             count=app.current_match_count,
             deck_name=settings["deck_name"],
         )
-        self.reset_inputs()
+        self.reset_inputs(focus_opponent=True)
+        self._load_last_record()
         toast(get_text("match_entry.toast_recorded"))
 
-    def reset_inputs(self):
+    def reset_inputs(self, focus_opponent: bool = False):
         # トグルボタンとテキストフィールドを初期状態に戻す
         self.turn_choice = None
         self.result_choice = None
@@ -736,6 +901,8 @@ class MatchEntryScreen(BaseManagedScreen):
         self._update_toggle_style(self.result_buttons, None)
         self.opponent_field.text = ""
         self.keyword_field.text = ""
+        if focus_opponent:
+            self.opponent_field.focus = True
 
 
 class StatsScreen(BaseManagedScreen):
@@ -787,6 +954,9 @@ class StatsScreen(BaseManagedScreen):
     def open_deck_menu(self):
         # 登録済みデッキから絞り込み候補を作成
         app = get_app_state()
+        db = getattr(app, "db", None)
+        if db is not None:
+            app.decks = db.fetch_decks()
         if not app.decks:
             toast(get_text("stats.toast_no_decks"))
             return
@@ -824,9 +994,12 @@ class StatsScreen(BaseManagedScreen):
     def update_stats(self):
         # 試合記録から統計情報を計算し、表示内容を組み立てる
         app = get_app_state()
-        records = app.match_records
-        if self.selected_deck:
-            records = [r for r in records if r["deck_name"] == self.selected_deck]
+        db = getattr(app, "db", None)
+        if db is None:
+            self.stats_label.text = get_text("common.db_error")
+            return
+
+        records = db.fetch_matches(self.selected_deck)
 
         if not records:
             # 条件に合致するデータが無い場合のメッセージ
@@ -860,6 +1033,8 @@ class StatsScreen(BaseManagedScreen):
 class SettingsScreen(BaseManagedScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.confirm_dialog: MDDialog | None = None
+
         # 設定項目を縦方向に並べるレイアウト
         layout = MDBoxLayout(orientation="vertical", spacing=dp(16), padding=dp(24))
         layout.add_widget(
@@ -874,6 +1049,7 @@ class SettingsScreen(BaseManagedScreen):
                 theme_text_color="Secondary",
             )
         )
+        layout.add_widget(self._build_database_section())
         layout.add_widget(
             MDRaisedButton(
                 text=get_text("common.exit"),
@@ -888,8 +1064,89 @@ class SettingsScreen(BaseManagedScreen):
         )
         self.add_widget(layout)
 
+    def _build_database_section(self):
+        card = MDCard(
+            orientation="vertical",
+            padding=(dp(16), dp(16), dp(16), dp(16)),
+            size_hint=(1, None),
+            radius=[16, 16, 16, 16],
+        )
+        card.spacing = dp(12)
+        card.add_widget(
+            MDLabel(
+                text=get_text("settings.db_section_title"),
+                font_style="Subtitle1",
+            )
+        )
+        card.add_widget(
+            MDLabel(
+                text=get_text("settings.db_init_description"),
+                theme_text_color="Secondary",
+            )
+        )
+        card.add_widget(
+            MDRaisedButton(
+                text=get_text("settings.db_init_button"),
+                on_press=lambda *_: self.open_db_init_dialog(),
+            )
+        )
+        return card
+
+    def open_db_init_dialog(self):
+        if self.confirm_dialog:
+            self.confirm_dialog.dismiss()
+        self.confirm_dialog = MDDialog(
+            title=get_text("settings.db_init_button"),
+            text=get_text("settings.db_init_confirm"),
+            buttons=[
+                MDFlatButton(
+                    text=get_text("common.cancel"),
+                    on_release=self._dismiss_dialog,
+                ),
+                MDRaisedButton(
+                    text=get_text("common.execute"),
+                    on_release=self._perform_db_initialization,
+                ),
+            ],
+        )
+        self.confirm_dialog.open()
+
+    def _dismiss_dialog(self, *_):
+        if self.confirm_dialog:
+            self.confirm_dialog.dismiss()
+            self.confirm_dialog = None
+
+    def _perform_db_initialization(self, *_):
+        self._dismiss_dialog()
+
+        app = get_app_state()
+        db = getattr(app, "db", None)
+        if db is None:
+            toast(get_text("common.db_error"))
+            return
+
+        try:
+            db.initialize_database()
+            app.decks = db.fetch_decks()
+            app.seasons = db.fetch_seasons()
+            app.match_records = []
+            app.current_match_settings = None
+            app.current_match_count = 0
+            _fallback_app_state.db = db
+            _fallback_app_state.decks = []
+            _fallback_app_state.seasons = []
+            _fallback_app_state.match_records = []
+            _fallback_app_state.current_match_settings = None
+            _fallback_app_state.current_match_count = 0
+        except Exception:  # pragma: no cover - defensive
+            toast(get_text("settings.db_init_failure"))
+            return
+
+        toast(get_text("settings.db_init_success"))
+
     def exit_app(self):
         # アプリを終了しウィンドウを閉じる
+        self._dismiss_dialog()
         app = MDApp.get_running_app()
         if app:
             app.stop()
@@ -898,13 +1155,20 @@ class SettingsScreen(BaseManagedScreen):
 class DeckAnalyzerApp(MDApp):
     def build(self):
         self.theme_cls.primary_palette = "BlueGray"
-        self.decks = []
-        self.seasons = []
-        self.match_records = []
+        self.db = DatabaseManager()
+        self.db.ensure_database()
+        self.decks = self.db.fetch_decks()
+        self.seasons = self.db.fetch_seasons()
+        self.match_records = self.db.fetch_matches()
         self.current_match_settings = None
         self.current_match_count = 0
+
         _fallback_app_state.reset()
         _fallback_app_state.theme_cls.primary_color = self.theme_cls.primary_color
+        _fallback_app_state.db = self.db
+        _fallback_app_state.decks = list(self.decks)
+        _fallback_app_state.seasons = list(self.seasons)
+        _fallback_app_state.match_records = list(self.match_records)
         sm = MDScreenManager()
         sm.add_widget(MenuScreen(name="menu"))
         sm.add_widget(DeckRegistrationScreen(name="deck_register"))
