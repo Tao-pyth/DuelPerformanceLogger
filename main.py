@@ -468,6 +468,24 @@ class BaseManagedScreen(MDScreen):
         if self.manager:
             self.manager.current = screen_name
 
+    def _sync_window_size(self, mode: str) -> None:
+        """モードに応じてウィンドウサイズを調整する."""
+
+        app = get_app_state()
+        default_size = getattr(app, "default_window_size", Window.size)
+
+        if mode == "broadcast":
+            min_width, min_height = 1280, 720
+            target_size = (
+                max(default_size[0], min_width),
+                max(default_size[1], min_height),
+            )
+        else:
+            target_size = default_size
+
+        if tuple(Window.size) != tuple(target_size):
+            Window.size = target_size
+
 
 class DeckRegistrationScreen(BaseManagedScreen):
     def __init__(self, **kwargs):
@@ -723,97 +741,56 @@ class SeasonListScreen(BaseManagedScreen):
                 )
 
     def _create_season_card(self, season: dict[str, object]):
-        fallback_description = get_text("common.no_description")
         card = MDCard(
-            orientation="vertical",
-            padding=(dp(16), dp(16), dp(16), dp(16)),
+            orientation="horizontal",
+            padding=(dp(16), dp(12), dp(12), dp(12)),
             size_hint=(1, None),
+            height=dp(72),
             radius=[16, 16, 16, 16],
         )
-        card.spacing = dp(6)
+        card.spacing = dp(12)
 
-        header = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(36))
-        header.add_widget(
-            MDLabel(text=season["name"], font_style="Subtitle1", shorten=True)
+        name_label = MDLabel(
+            text=season["name"],
+            font_style="Subtitle1",
+            shorten=True,
         )
-        header.add_widget(Widget())
+        name_label.size_hint_x = 0.55
+        card.add_widget(name_label)
+
+        remaining_label = MDLabel(
+            text=self._get_remaining_text(season),
+            theme_text_color="Secondary",
+            halign="center",
+            shorten=True,
+        )
+        remaining_label.size_hint_x = 0.35
+        card.add_widget(remaining_label)
+
         delete_button = MDIconButton(
             icon="delete", on_release=lambda *_: self.delete_season(season["name"])
         )
         delete_button.theme_text_color = "Custom"
         delete_button.text_color = (0.86, 0.16, 0.16, 1)
-        header.add_widget(delete_button)
-        card.add_widget(header)
-
-        card.add_widget(
-            MDLabel(
-                text=season.get("description") or fallback_description,
-                theme_text_color="Secondary",
-                shorten=True,
-            )
-        )
-
-        for line in self._build_schedule_lines(season):
-            card.add_widget(
-                MDLabel(
-                    text=line,
-                    theme_text_color="Hint",
-                )
-            )
+        delete_button.size_hint = (None, None)
+        delete_button.height = dp(48)
+        card.add_widget(delete_button)
 
         return card
 
-    def _build_schedule_lines(self, season: dict[str, object]) -> list[str]:
-        lines: list[str] = []
-        now = datetime.now()
-
-        start_date = season.get("start_date") or ""
-        start_time = season.get("start_time") or ""
+    def _get_remaining_text(self, season: dict[str, object]) -> str:
         end_date = season.get("end_date") or ""
         end_time = season.get("end_time") or ""
-
-        start_dt = _parse_schedule_datetime(start_date, start_time)
         end_dt = _parse_schedule_datetime(end_date, end_time)
 
-        if start_dt:
-            display_time = start_time or "--:--"
-            lines.append(
-                get_text("season_registration.schedule_start_label").format(
-                    date=start_dt.strftime("%Y-%m-%d"),
-                    time=display_time,
-                )
-            )
-            if start_dt > now:
-                days = _days_until(start_dt)
-                if days > 0:
-                    lines.append(
-                        get_text("season_registration.schedule_starts_in").format(
-                            days=days
-                        )
-                    )
-            elif end_dt and end_dt > now:
-                lines.append(get_text("season_registration.schedule_running"))
+        if not end_dt:
+            return get_text("season_registration.schedule_no_end")
 
-        if end_dt:
-            display_time = end_time or "--:--"
-            lines.append(
-                get_text("season_registration.schedule_end_label").format(
-                    date=end_dt.strftime("%Y-%m-%d"),
-                    time=display_time,
-                )
-            )
-            if end_dt > now:
-                days = _days_until(end_dt)
-                if days > 0:
-                    lines.append(
-                        get_text("season_registration.schedule_ends_in").format(
-                            days=days
-                        )
-                    )
-            else:
-                lines.append(get_text("season_registration.schedule_finished"))
+        if end_dt <= datetime.now():
+            return get_text("season_registration.schedule_finished")
 
-        return lines
+        days = _days_until(end_dt)
+        return get_text("season_registration.schedule_ends_in").format(days=days)
 
     def delete_season(self, name: str):
         app = get_app_state()
@@ -1930,15 +1907,20 @@ class SettingsScreen(BaseManagedScreen):
             lambda: self.change_screen("menu"),
         )
 
-        content_box = MDBoxLayout(
+        self.settings_scroll = ScrollView(size_hint=(0.95, 0.95))
+        self.settings_container = MDBoxLayout(
             orientation="vertical",
             spacing=dp(16),
             padding=(dp(24), dp(24), dp(24), dp(24)),
-            size_hint=(0.95, 0.95),
+            size_hint_y=None,
         )
-        content_box.add_widget(self._build_ui_section())
-        content_box.add_widget(self._build_database_section())
-        content_anchor.add_widget(content_box)
+        self.settings_container.bind(
+            minimum_height=self.settings_container.setter("height")
+        )
+        self.settings_scroll.add_widget(self.settings_container)
+        self.settings_container.add_widget(self._build_ui_section())
+        self.settings_container.add_widget(self._build_database_section())
+        content_anchor.add_widget(self.settings_scroll)
 
         exit_button = MDRaisedButton(
             text=get_text("common.exit"),
@@ -1963,6 +1945,7 @@ class SettingsScreen(BaseManagedScreen):
             radius=[16, 16, 16, 16],
         )
         card.spacing = dp(12)
+        card.bind(minimum_height=card.setter("height"))
         card.add_widget(
             MDLabel(
                 text=get_text("settings.db_section_title"),
@@ -1980,24 +1963,26 @@ class SettingsScreen(BaseManagedScreen):
             theme_text_color="Hint",
         )
         card.add_widget(self.backup_info_label)
-        card.add_widget(
-            MDRaisedButton(
-                text=get_text("settings.backup_button"),
-                on_press=lambda *_: self.create_backup(),
-            )
+        backup_button = MDRaisedButton(
+            text=get_text("settings.backup_button"),
+            on_press=lambda *_: self.create_backup(),
         )
+        backup_button.size_hint = (1, None)
+        backup_button.height = dp(48)
+        card.add_widget(backup_button)
         card.add_widget(
             MDLabel(
                 text=get_text("settings.db_init_description"),
                 theme_text_color="Secondary",
             )
         )
-        card.add_widget(
-            MDRaisedButton(
-                text=get_text("settings.db_init_button"),
-                on_press=lambda *_: self.open_db_init_dialog(),
-            )
+        init_button = MDRaisedButton(
+            text=get_text("settings.db_init_button"),
+            on_press=lambda *_: self.open_db_init_dialog(),
         )
+        init_button.size_hint = (1, None)
+        init_button.height = dp(48)
+        card.add_widget(init_button)
         return card
 
     def _build_ui_section(self):
@@ -2008,6 +1993,7 @@ class SettingsScreen(BaseManagedScreen):
             radius=[16, 16, 16, 16],
         )
         card.spacing = dp(12)
+        card.bind(minimum_height=card.setter("height"))
         card.add_widget(
             MDLabel(
                 text=get_text("settings.ui_section_title"),

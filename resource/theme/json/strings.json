@@ -76,6 +76,7 @@
     "schedule_end_label": "終了: {date} {time}",
     "schedule_ends_in": "終了まであと {days} 日",
     "schedule_finished": "終了済み",
+    "schedule_no_end": "終了日未設定",
     "empty_message": "登録済みシーズンはありません",
     "toast_missing_name": "シーズン名を入力してください",
     "toast_duplicate": "同じ名前のシーズンが既に登録されています",
