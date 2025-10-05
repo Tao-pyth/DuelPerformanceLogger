@@ -475,11 +475,7 @@ class BaseManagedScreen(MDScreen):
         default_size = getattr(app, "default_window_size", Window.size)
 
         if mode == "broadcast":
-            min_width, min_height = 1280, 720
-            target_size = (
-                max(default_size[0], min_width),
-                max(default_size[1], min_height),
-            )
+            target_size = (1080, 280)
         else:
             target_size = default_size
 
@@ -975,54 +971,61 @@ class MatchSetupScreen(BaseManagedScreen):
         )
 
         (
-            self.root_layout,
+            self.normal_root,
             content_anchor,
-            action_anchor,
+            self.normal_action_anchor,
         ) = self._create_scaffold(
             get_text("match_setup.header_title"),
             lambda: self.change_screen("menu"),
             lambda: self.change_screen("menu"),
         )
 
-        content_box = MDBoxLayout(
+        self.count_label = MDLabel(
+            text=get_text("match_setup.count_label"),
+            font_style="Subtitle1",
+        )
+        self.deck_label = MDLabel(
+            text=get_text("match_setup.deck_label"),
+            font_style="Subtitle1",
+        )
+
+        self.match_count_field.size_hint = (1, None)
+        self.match_count_field.height = dp(72)
+        self.deck_button.size_hint = (1, None)
+        self.deck_button.height = dp(48)
+
+        self.normal_content_box = MDBoxLayout(
             orientation="vertical",
             spacing=dp(16),
             padding=(dp(24), dp(24), dp(24), dp(24)),
             size_hint=(0.95, 0.95),
         )
-        content_box.add_widget(
-            MDLabel(
-                text=get_text("match_setup.count_label"),
-                font_style="Subtitle1",
-            )
-        )
-        self.match_count_field.size_hint = (1, None)
-        self.match_count_field.height = dp(72)
-        content_box.add_widget(self.match_count_field)
-        content_box.add_widget(
-            MDLabel(
-                text=get_text("match_setup.deck_label"),
-                font_style="Subtitle1",
-            )
-        )
-        self.deck_button.size_hint = (1, None)
-        self.deck_button.height = dp(48)
-        content_box.add_widget(self.deck_button)
-        content_anchor.add_widget(content_box)
+        self.normal_content_box.add_widget(self.count_label)
+        self.normal_content_box.add_widget(self.match_count_field)
+        self.normal_content_box.add_widget(self.deck_label)
+        self.normal_content_box.add_widget(self.deck_button)
+        content_anchor.add_widget(self.normal_content_box)
 
-        start_button = MDRaisedButton(
+        self.start_button = MDRaisedButton(
             text=get_text("match_setup.start_button"),
             on_press=lambda *_: self.start_entry(),
         )
-        start_button.size_hint = (None, None)
-        start_button.height = dp(48)
-        start_button.width = dp(220)
-        action_anchor.add_widget(start_button)
+        self.start_button.size_hint = (None, None)
+        self.start_button.height = dp(48)
+        self.start_button.width = dp(220)
+        self.normal_action_anchor.add_widget(self.start_button)
+
+        self.broadcast_layout = self._build_broadcast_layout()
 
     def on_pre_enter(self):
         # 画面に入るたびに選択状態をリセット
         self.selected_deck = None
         self.deck_button.text = get_text("match_setup.deck_button_default")
+
+        app = get_app_state()
+        mode = getattr(app, "ui_mode", "normal")
+        self._apply_mode_layout(mode)
+        self._sync_window_size(mode)
 
     def open_deck_menu(self):
         # 登録済みデッキから選択肢を生成しドロップダウンで表示
@@ -1086,6 +1089,110 @@ class MatchSetupScreen(BaseManagedScreen):
         toast(get_text("match_setup.toast_start"))
         self.change_screen("match_entry")
 
+    def _build_broadcast_layout(self) -> MDBoxLayout:
+        layout = MDBoxLayout(
+            orientation="horizontal",
+            spacing=dp(12),
+            padding=(dp(12), dp(12), dp(12), dp(12)),
+        )
+
+        nav_section = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=1,
+        )
+        for icon, callback in (
+            ("home", lambda *_: self.change_screen("menu")),
+            ("arrow-left", lambda *_: self.change_screen("menu")),
+        ):
+            button = MDIconButton(icon=icon, on_release=callback)
+            button.theme_text_color = "Custom"
+            button.text_color = (0.18, 0.36, 0.58, 1)
+            button.size_hint = (None, None)
+            button.height = dp(48)
+            button.width = dp(48)
+            nav_section.add_widget(button)
+        layout.add_widget(nav_section)
+
+        self.broadcast_form_section = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=5,
+            padding=(dp(12), dp(12), dp(12), dp(12)),
+        )
+        layout.add_widget(self.broadcast_form_section)
+
+        self.broadcast_actions_section = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=2,
+        )
+        layout.add_widget(self.broadcast_actions_section)
+
+        return layout
+
+    @staticmethod
+    def _remove_from_parent(widget):
+        parent = widget.parent
+        if parent is not None:
+            parent.remove_widget(widget)
+
+    def _apply_mode_layout(self, mode: str) -> None:
+        if mode == "broadcast":
+            self._show_broadcast_layout()
+        else:
+            self._show_normal_layout()
+
+    def _show_broadcast_layout(self) -> None:
+        if self.normal_root.parent:
+            self.remove_widget(self.normal_root)
+        if not self.broadcast_layout.parent:
+            self.add_widget(self.broadcast_layout)
+
+        self.broadcast_form_section.clear_widgets()
+        for widget in (
+            self.count_label,
+            self.match_count_field,
+            self.deck_label,
+            self.deck_button,
+        ):
+            self._remove_from_parent(widget)
+            self.broadcast_form_section.add_widget(widget)
+
+        self.broadcast_actions_section.clear_widgets()
+        self._remove_from_parent(self.start_button)
+        self.start_button.size_hint = (1, None)
+        self.start_button.width = dp(180)
+        self.broadcast_actions_section.add_widget(self.start_button)
+
+    def _show_normal_layout(self) -> None:
+        if self.broadcast_layout.parent:
+            self.remove_widget(self.broadcast_layout)
+        if not self.normal_root.parent:
+            self.add_widget(self.normal_root)
+
+        for widget in (
+            self.count_label,
+            self.match_count_field,
+            self.deck_label,
+            self.deck_button,
+        ):
+            self._remove_from_parent(widget)
+            if widget not in self.normal_content_box.children:
+                self.normal_content_box.add_widget(widget)
+
+        self._remove_from_parent(self.start_button)
+        self.start_button.size_hint = (None, None)
+        self.start_button.width = dp(220)
+        if self.start_button not in self.normal_action_anchor.children:
+            self.normal_action_anchor.add_widget(self.start_button)
+
+    def on_leave(self):
+        app = get_app_state()
+        default_size = getattr(app, "default_window_size", None)
+        if default_size:
+            Window.size = default_size
+
 
 
 class MatchEntryScreen(BaseManagedScreen):
@@ -1111,7 +1218,13 @@ class MatchEntryScreen(BaseManagedScreen):
         self.clock_label = MDLabel(
             text=self._get_current_time_text(),
             halign="center",
-            font_style="H4",
+            font_style="H5",
+        )
+
+        self.match_info_label = MDLabel(
+            text="",
+            halign="center",
+            font_style="Subtitle1",
         )
 
         self.status_label = MDLabel(
@@ -1212,6 +1325,7 @@ class MatchEntryScreen(BaseManagedScreen):
 
         self.normal_content_widgets = [
             self.clock_label,
+            self.match_info_label,
             self.status_label,
             self.last_record_card,
             self.turn_prompt_label,
@@ -1357,12 +1471,26 @@ class MatchEntryScreen(BaseManagedScreen):
         self.broadcast_time_section = MDAnchorLayout(
             size_hint_x=4, anchor_x="center", anchor_y="center"
         )
+        time_box = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(4),
+            size_hint=(1, None),
+            height=dp(96),
+        )
+        time_box.bind(minimum_height=time_box.setter("height"))
         self.broadcast_clock_label = MDLabel(
             text=self._get_current_time_text(),
             halign="center",
-            font_style="H3",
+            font_style="H5",
         )
-        self.broadcast_time_section.add_widget(self.broadcast_clock_label)
+        self.broadcast_match_info_label = MDLabel(
+            text="",
+            halign="center",
+            font_style="Subtitle1",
+        )
+        time_box.add_widget(self.broadcast_clock_label)
+        time_box.add_widget(self.broadcast_match_info_label)
+        self.broadcast_time_section.add_widget(time_box)
         layout.add_widget(self.broadcast_time_section)
 
         self.turn_container_broadcast = MDBoxLayout(
@@ -1630,11 +1758,22 @@ class MatchEntryScreen(BaseManagedScreen):
         self.status_label.text = summary
         if hasattr(self, "broadcast_status_label"):
             self.broadcast_status_label.text = summary
+        self._set_match_info(count, deck_name)
 
     def _set_status_message(self, message: str) -> None:
         self.status_label.text = message
         if hasattr(self, "broadcast_status_label"):
             self.broadcast_status_label.text = message
+
+    def _set_match_info(self, count: int | None, deck_name: str | None) -> None:
+        if count is None or not deck_name:
+            info_text = ""
+        else:
+            info_text = f"#{count} {deck_name}"
+        if hasattr(self, "match_info_label"):
+            self.match_info_label.text = info_text
+        if hasattr(self, "broadcast_match_info_label"):
+            self.broadcast_match_info_label.text = info_text
 
     def set_turn_choice(self, choice):
         # 選択されたボタンのみアクティブ状態にする
@@ -1720,6 +1859,7 @@ class MatchEntryScreen(BaseManagedScreen):
         if not settings:
             message = get_text("match_entry.status_missing_setup")
             self._set_status_message(message)
+            self._set_match_info(None, None)
             self.last_record_data = None
             if hasattr(self, "last_record_label"):
                 self.last_record_label.text = get_text("match_entry.last_record_empty")
@@ -1739,7 +1879,7 @@ class MatchEntryScreen(BaseManagedScreen):
             Window.size = default_size
 
     def _get_current_time_text(self) -> str:
-        return datetime.now().strftime("%H:%M:%S")
+        return datetime.now().strftime("%Y/%m/%d %H:%M:%S")
 
     def _update_clock(self, *_):
         current = self._get_current_time_text()
