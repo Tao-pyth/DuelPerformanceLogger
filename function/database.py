@@ -50,6 +50,11 @@ class DatabaseManager:
     """
 
     CURRENT_SCHEMA_VERSION = 3
+    METADATA_DEFAULTS = {
+        "schema_version": str(CURRENT_SCHEMA_VERSION),
+        "ui_mode": "normal",
+        "last_backup": "",
+    }
 
     def __init__(self, db_path: Optional[Path | str] = None) -> None:
         # プロジェクトルートからの相対で DB 既定置き場を解決
@@ -110,6 +115,7 @@ class DatabaseManager:
 
         if needs_initialization:
             self.initialize_database()
+        self.ensure_metadata_defaults()
 
     # ------------------------------------------------------------------
     # バージョン管理
@@ -117,26 +123,16 @@ class DatabaseManager:
     def get_schema_version(self) -> int:
         """保存されているスキーマバージョンを取得する。"""
 
+        value = self.get_metadata("schema_version")
         try:
-            with self._connect() as connection:
-                cursor = connection.execute(
-                    "SELECT value FROM db_metadata WHERE key = 'schema_version'"
-                )
-                row = cursor.fetchone()
-                if row is None:
-                    return 0
-                return int(row["value"])
-        except (ValueError, sqlite3.DatabaseError):  # pragma: no cover - defensive
+            return int(value) if value is not None else 0
+        except ValueError:  # pragma: no cover - defensive
             return 0
 
     def set_schema_version(self, version: int) -> None:
         """スキーマバージョンを更新する。"""
 
-        with self._connect() as connection:
-            connection.execute(
-                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
-                ("schema_version", str(int(version))),
-            )
+        self.set_metadata("schema_version", str(int(version)))
 
     def initialize_database(self) -> None:
         """DB を初期化（既存ファイルを残したままスキーマを再構築）。
@@ -211,6 +207,65 @@ class DatabaseManager:
                 "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
                 ("schema_version", str(self.CURRENT_SCHEMA_VERSION)),
             )
+            cursor.execute(
+                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
+                ("ui_mode", "normal"),
+            )
+            cursor.execute(
+                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
+                ("last_backup", ""),
+            )
+
+    # ------------------------------------------------------------------
+    # メタデータ操作
+    # ------------------------------------------------------------------
+    def ensure_metadata_defaults(self) -> None:
+        """メタデータに必須の既定値が存在することを保証する。"""
+
+        with self._connect() as connection:
+            for key, value in self.METADATA_DEFAULTS.items():
+                cursor = connection.execute(
+                    "SELECT 1 FROM db_metadata WHERE key = ?", (key,)
+                )
+                if cursor.fetchone() is None:
+                    connection.execute(
+                        "INSERT INTO db_metadata (key, value) VALUES (?, ?)",
+                        (key, value),
+                    )
+
+    def get_metadata(self, key: str, default: str | None = None) -> str | None:
+        """Retrieve a metadata value or return *default* when absent."""
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "SELECT value FROM db_metadata WHERE key = ?", (key,)
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    return default
+                return row["value"]
+        except sqlite3.DatabaseError:  # pragma: no cover - defensive
+            return default
+
+    def set_metadata(self, key: str, value: str) -> None:
+        """Persist a metadata value as text."""
+
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+
+    def get_ui_mode(self, default: str = "normal") -> str:
+        value = self.get_metadata("ui_mode", default) or default
+        return value
+
+    def set_ui_mode(self, mode: str) -> None:
+        self.set_metadata("ui_mode", mode)
+
+    def record_backup_path(self, path: Path | str) -> None:
+        self.set_metadata("last_backup", str(path))
 
     # ------------------------------------------------------------------
     # バックアップユーティリティ
