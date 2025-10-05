@@ -88,8 +88,25 @@ class DatabaseManager:
         return self._db_path
 
     def ensure_database(self) -> None:
-        """DB ファイルが存在しない場合にスキーマを作成します。"""
+        """DB ファイルが存在しない、またはメタデータが欠損している場合にスキーマを作成します。"""
+
+        needs_initialization = False
+
         if not self._db_path.exists():
+            needs_initialization = True
+        else:
+            try:
+                with self._connect() as connection:
+                    cursor = connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='db_metadata'"
+                    )
+                    if cursor.fetchone() is None:
+                        needs_initialization = True
+            except sqlite3.DatabaseError:
+                # 何らかの理由で接続やメタデータ取得に失敗した場合も初期化する
+                needs_initialization = True
+
+        if needs_initialization:
             self.initialize_database()
 
     # ------------------------------------------------------------------
