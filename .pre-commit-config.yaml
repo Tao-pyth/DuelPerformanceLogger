@@ -9,6 +9,7 @@ repos:
     hooks:
       - id: forbid-kivymd-iconbutton-import
         name: Prevent invalid kivymd.uix.iconbutton imports
-        entry: bash -c 'if grep -R "kivymd\\.uix\\.iconbutton" -n; then echo "Forbidden import path detected. Use kivymd.uix.button instead."; exit 1; fi'
         language: system
+        entry: bash -c 'if git grep -n -- "kivymd\.uix\.iconbutton" -- . ; then echo "Forbidden import path detected. Use kivymd.uix.button instead."; exit 1; fi'
         pass_filenames: false
+        files: \.(py|kv)$   # ← ここで YAML/MD/ TOML を対象外にする
