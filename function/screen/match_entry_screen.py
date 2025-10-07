@@ -651,13 +651,13 @@ class MatchEntryScreen(BaseManagedScreen):
             self.quick_actions.add_widget(button)
 
     def _update_status_summary(self, count: int, deck_name: str) -> None:
-        summary = get_text("match_entry.status_summary").format(
-            count=count,
-            deck_name=deck_name,
-        )
-        self.status_label.text = summary
-        if hasattr(self, "broadcast_status_label"):
-            self.broadcast_status_label.text = summary
+        # summary = get_text("match_entry.status_summary").format(
+        #     count=count,
+        #     deck_name=deck_name,
+        # )
+        # self.status_label.text = summary
+        # if hasattr(self, "broadcast_status_label"):
+        #     self.broadcast_status_label.text = summary
         self._set_match_info(count, deck_name)
 
     def _set_status_message(self, message: str) -> None:
