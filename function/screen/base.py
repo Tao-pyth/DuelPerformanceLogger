@@ -166,5 +166,20 @@ class BaseManagedScreen(MDScreen):
         if tuple(Window.size) != tuple(target_size):
             Window.size = target_size
 
+    # ------------------------------------------------------------------
+    # Translation helpers
+    # ------------------------------------------------------------------
+    def t(self, key: str) -> str:
+        """Translate the given resource key using the active application state."""
+
+        app = get_app_state()
+        translator = getattr(app, "t", None)
+        if callable(translator):
+            try:
+                return translator(key)
+            except Exception:  # pragma: no cover - defensive fallback
+                pass
+        return get_text(key)
+
 
 __all__ = ["BaseManagedScreen", "build_header", "resolve_screen_name"]

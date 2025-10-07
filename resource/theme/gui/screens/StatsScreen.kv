@@ -1,3 +1,42 @@
 #:kivy 2.2.1
+#:import dp kivy.metrics.dp
+
 <StatsScreen>:
-    # Layout defined programmatically in function/screen/stats_screen.py
+    MDBoxLayout:
+        orientation: "vertical"
+
+        AppToolbar:
+            title: root.t("stats.header_title")
+            left_action_items: [["arrow-left", lambda x: root.change_screen("menu")]]
+            right_action_items: [["home", lambda x: root.change_screen("menu")]]
+
+        MDScrollView:
+            MDBoxLayout:
+                orientation: "vertical"
+                padding: (dp(24), dp(24), dp(24), dp(24))
+                spacing: dp(16)
+                size_hint_y: None
+                height: self.minimum_height
+
+                PrimaryRaisedButton:
+                    id: filter_button
+                    text: root.filter_button_label
+                    on_release: root.open_deck_menu()
+
+                MDLabel:
+                    text: root.stats_text
+                    theme_text_color: "Secondary"
+                    text_size: self.width, None
+                    size_hint_y: None
+                    height: self.texture_size[1]
+
+        MDBoxLayout:
+            padding: (dp(24), dp(12), dp(24), dp(24))
+            size_hint_y: None
+            height: dp(72)
+
+            Widget:
+
+            SecondaryFlatButton:
+                text: root.t("common.clear_filter")
+                on_release: root.clear_filter()

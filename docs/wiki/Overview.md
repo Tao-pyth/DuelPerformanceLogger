@@ -10,6 +10,7 @@
 - `main.py` は KivyMD アプリ本体であり、画面管理 (`MDScreenManager`) や初期化処理を担う。具体的な UI ロジックは `function/screen` 配下の個別モジュールに定義され、責務が分離された。
 - `function.cmn_app_state.get_fallback_state()` が返す `_FallbackAppState` により、`MDApp` が起動していない状態でも設定やデータベース接続などの属性へアクセス可能。テストやスクリプト実行時の安全装置として機能する。
 - `function.screen.base.build_header` のような UI ヘルパーで、画面上部の共通ヘッダー（タイトル、戻る・トップボタン）を再利用可能にしている。
+- 各 `Screen` クラスは制御ロジックと状態公開のみを担当し、ウィジェットツリーは `resource/theme/gui/screens/<ClassName>.kv` に定義する。`MatchEntryScreen` で導入したパターンに従い、`BooleanProperty`・`StringProperty` などで UI 状態を表現し、KV 側でバインドして見た目を更新する。
 
 ### Localization Resources / ローカライズリソース
 - `function.cmn_resources.get_text` は `resource/theme/json/strings.json` の辞書データからドット区切りキーで文言を取得。`lru_cache` により I/O を最小化。

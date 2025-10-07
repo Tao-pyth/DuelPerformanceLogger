@@ -1,3 +1,66 @@
 #:kivy 2.2.1
+#:import dp kivy.metrics.dp
+
 <DeckRegistrationScreen>:
-    # Layout defined programmatically in function/screen/deck_registration_screen.py
+    MDBoxLayout:
+        orientation: "vertical"
+
+        AppToolbar:
+            title: root.t("deck_registration.header_title")
+            left_action_items: [["arrow-left", lambda x: root.change_screen("menu")]]
+            right_action_items: [["home", lambda x: root.change_screen("menu")]]
+
+        MDScrollView:
+            MDBoxLayout:
+                orientation: "vertical"
+                padding: (dp(24), dp(24), dp(24), dp(24))
+                spacing: dp(16)
+                size_hint_y: None
+                height: self.minimum_height
+
+                MDTextField:
+                    id: name_field
+                    hint_text: root.t("deck_registration.name_hint")
+                    helper_text: root.t("common.required_helper")
+                    helper_text_mode: "on_focus"
+
+                MDTextField:
+                    id: description_field
+                    hint_text: root.t("deck_registration.description_hint")
+                    multiline: True
+                    max_text_length: 200
+
+                MDLabel:
+                    text: root.t("deck_registration.empty_message")
+                    theme_text_color: "Hint"
+                    size_hint_y: None
+                    height: dp(24) if not root.has_decks else 0
+                    opacity: 0 if root.has_decks else 1
+
+                RecycleView:
+                    viewclass: "DeckListItem"
+                    data: root.deck_items
+                    size_hint_y: None
+                    height: self.minimum_height if root.has_decks else 0
+                    opacity: 1 if root.has_decks else 0
+
+                    RecycleBoxLayout:
+                        default_size: None, dp(84)
+                        default_size_hint: 1, None
+                        size_hint_y: None
+                        height: self.minimum_height
+                        orientation: "vertical"
+                        spacing: dp(8)
+
+        MDBoxLayout:
+            padding: (dp(24), dp(12), dp(24), dp(24))
+            size_hint_y: None
+            height: dp(72)
+
+            Widget:
+
+            PrimaryRaisedButton:
+                text: root.t("common.register")
+                size_hint_x: None
+                width: dp(220)
+                on_release: root.register_deck()

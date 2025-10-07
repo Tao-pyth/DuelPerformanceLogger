@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-from kivy.metrics import dp
-from kivy.uix.widget import Widget
 from kivy.core.window import Window
+from kivy.properties import BooleanProperty, StringProperty
 from kivymd.toast import toast
-from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.button import MDRaisedButton
-from kivymd.uix.button import MDIconButton
-from kivymd.uix.label import MDLabel
 from kivymd.uix.menu import MDDropdownMenu
-from kivymd.uix.textfield import MDTextField
 
 from function.cmn_app_state import get_app_state
 from function.cmn_resources import get_text
@@ -22,80 +16,33 @@ from .base import BaseManagedScreen
 class MatchSetupScreen(BaseManagedScreen):
     screen_mode = "normal"
 
+    deck_button_label = StringProperty("")
+    active_mode = StringProperty("normal")
+    is_broadcast = BooleanProperty(False)
+    selected_deck = StringProperty("")
+
     def __init__(self, **kwargs):
         # `screen_mode` は通常画面か配信向け画面かを表す。継承クラスで上書きされる。
         self.screen_mode = getattr(self.__class__, "screen_mode", "normal")
         super().__init__(**kwargs)
-        self.selected_deck: str | None = None
         self.deck_menu: MDDropdownMenu | None = None
 
-        # 対戦数入力フィールドとデッキ選択ボタンを準備する。
-        self.match_count_field = MDTextField(
-            hint_text=get_text("match_setup.count_hint"),
-            input_filter="int",
-            text="0",
-        )
-        self.deck_button = MDRaisedButton(
-            text=get_text("match_setup.deck_button_default"),
-            on_press=lambda *_: self.open_deck_menu(),
-        )
-
-        (
-            self.normal_root,
-            content_anchor,
-            self.normal_action_anchor,
-        ) = self._create_scaffold(
-            get_text("match_setup.header_title"),
-            lambda: self.change_screen("menu"),
-            lambda: self.change_screen("menu"),
-        )
-
-        self.count_label = MDLabel(
-            text=get_text("match_setup.count_label"),
-            font_style="Subtitle1",
-        )
-        self.deck_label = MDLabel(
-            text=get_text("match_setup.deck_label"),
-            font_style="Subtitle1",
-        )
-
-        self.match_count_field.size_hint = (1, None)
-        self.match_count_field.height = dp(72)
-        self.deck_button.size_hint = (1, None)
-        self.deck_button.height = dp(48)
-
-        self.normal_content_box = MDBoxLayout(
-            orientation="vertical",
-            spacing=dp(16),
-            padding=(dp(24), dp(24), dp(24), dp(24)),
-            size_hint=(0.95, 0.95),
-        )
-        self.normal_content_box.add_widget(self.count_label)
-        self.normal_content_box.add_widget(self.match_count_field)
-        self.normal_content_box.add_widget(self.deck_label)
-        self.normal_content_box.add_widget(self.deck_button)
-        content_anchor.add_widget(self.normal_content_box)
-
-        self.start_button = MDRaisedButton(
-            text=get_text("match_setup.start_button"),
-            on_press=lambda *_: self.start_entry(),
-        )
-        self.start_button.size_hint = (None, None)
-        self.start_button.height = dp(48)
-        self.start_button.width = dp(220)
-        self.normal_action_anchor.add_widget(self.start_button)
-
-        # 配信用レイアウトをあらかじめ生成。必要な時に切り替えて利用する。
-        self.broadcast_layout = self._build_broadcast_layout()
+    def on_kv_post(self, base_widget):
+        super().on_kv_post(base_widget)
+        self.deck_button_label = self.t("match_setup.deck_button_default")
 
     def on_pre_enter(self):
         # 画面再表示時は選択状態をリセットし、表示モードに応じてレイアウトを切替。
-        self.selected_deck = None
-        self.deck_button.text = get_text("match_setup.deck_button_default")
+        self.selected_deck = ""
+        self.deck_button_label = self.t("match_setup.deck_button_default")
+        field = self._get_match_count_field()
+        if field is not None:
+            field.text = "0"
 
         app = get_app_state()
         mode = self.screen_mode or getattr(app, "ui_mode", "normal")
-        self._apply_mode_layout(mode)
+        self.active_mode = mode
+        self.is_broadcast = mode == "broadcast"
         self._sync_window_size(mode)
 
     def open_deck_menu(self):
@@ -121,21 +68,24 @@ class MatchSetupScreen(BaseManagedScreen):
         if self.deck_menu:
             self.deck_menu.dismiss()
 
-        self.deck_menu = MDDropdownMenu(caller=self.deck_button, items=menu_items, width_mult=4)
+        caller = self._get_deck_button()
+        self.deck_menu = MDDropdownMenu(caller=caller, items=menu_items, width_mult=4)
         self.deck_menu.open()
 
     def set_selected_deck(self, name: str):
         """ユーザーが選択したデッキ名を反映し、次の対戦番号を取得。"""
 
         self.selected_deck = name
-        self.deck_button.text = get_text("match_setup.selected_deck_label").format(
+        self.deck_button_label = self.t("match_setup.selected_deck_label").format(
             deck_name=name
         )
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is not None:
             next_no = db.get_next_match_number(name)
-            self.match_count_field.text = str(next_no)
+            field = self._get_match_count_field()
+            if field is not None:
+                field.text = str(next_no)
         if self.deck_menu:
             self.deck_menu.dismiss()
 
@@ -147,7 +97,9 @@ class MatchSetupScreen(BaseManagedScreen):
             return
 
         try:
-            initial_count = int(self.match_count_field.text or 0)
+            field = self._get_match_count_field()
+            text = field.text if field is not None else "0"
+            initial_count = int(text or 0)
         except ValueError:
             toast(get_text("match_setup.toast_invalid_count"))
             return
@@ -162,111 +114,15 @@ class MatchSetupScreen(BaseManagedScreen):
         toast(get_text("match_setup.toast_start"))
         self.change_screen("match_entry")
 
-    def _build_broadcast_layout(self) -> MDBoxLayout:
-        """配信モード用の横長レイアウトを生成。"""
-
-        layout = MDBoxLayout(
-            orientation="horizontal",
-            spacing=dp(12),
-            padding=(dp(12), dp(12), dp(12), dp(12)),
+    def _get_match_count_field(self):
+        return self.ids.get("match_count_field_normal") or self.ids.get(
+            "match_count_field_broadcast"
         )
 
-        nav_section = MDBoxLayout(
-            orientation="vertical",
-            spacing=dp(12),
-            size_hint_x=1,
+    def _get_deck_button(self):
+        return self.ids.get("deck_button_normal") or self.ids.get(
+            "deck_button_broadcast"
         )
-        for icon, callback in (
-            ("home", lambda *_: self.change_screen("menu")),
-            ("arrow-left", lambda *_: self.change_screen("menu")),
-        ):
-            button = MDIconButton(icon=icon, on_release=callback)
-            button.theme_text_color = "Custom"
-            button.text_color = (0.18, 0.36, 0.58, 1)
-            button.size_hint = (None, None)
-            button.height = dp(48)
-            button.width = dp(48)
-            nav_section.add_widget(button)
-        layout.add_widget(nav_section)
-
-        self.broadcast_form_section = MDBoxLayout(
-            orientation="vertical",
-            spacing=dp(12),
-            size_hint_x=5,
-            padding=(dp(12), dp(12), dp(12), dp(12)),
-        )
-        layout.add_widget(self.broadcast_form_section)
-
-        self.broadcast_actions_section = MDBoxLayout(
-            orientation="vertical",
-            spacing=dp(12),
-            size_hint_x=2,
-        )
-        layout.add_widget(self.broadcast_actions_section)
-
-        return layout
-
-    @staticmethod
-    def _remove_from_parent(widget: Widget):
-        parent = widget.parent
-        if parent is not None:
-            parent.remove_widget(widget)
-
-    def _apply_mode_layout(self, mode: str) -> None:
-        """画面モードに応じて適切なレイアウトを表示する。"""
-
-        if mode == "broadcast":
-            self._show_broadcast_layout()
-        else:
-            self._show_normal_layout()
-
-    def _show_broadcast_layout(self) -> None:
-        """配信用レイアウトへ切り替える。"""
-
-        if self.normal_root.parent:
-            self.remove_widget(self.normal_root)
-        if not self.broadcast_layout.parent:
-            self.add_widget(self.broadcast_layout)
-
-        self.broadcast_form_section.clear_widgets()
-        for widget in (
-            self.count_label,
-            self.match_count_field,
-            self.deck_label,
-            self.deck_button,
-        ):
-            self._remove_from_parent(widget)
-            self.broadcast_form_section.add_widget(widget)
-
-        self.broadcast_actions_section.clear_widgets()
-        self._remove_from_parent(self.start_button)
-        self.start_button.size_hint = (1, None)
-        self.start_button.width = dp(180)
-        self.broadcast_actions_section.add_widget(self.start_button)
-
-    def _show_normal_layout(self) -> None:
-        """通常レイアウトへ戻す。"""
-
-        if self.broadcast_layout.parent:
-            self.remove_widget(self.broadcast_layout)
-        if not self.normal_root.parent:
-            self.add_widget(self.normal_root)
-
-        for widget in (
-            self.count_label,
-            self.match_count_field,
-            self.deck_label,
-            self.deck_button,
-        ):
-            self._remove_from_parent(widget)
-            if widget not in self.normal_content_box.children:
-                self.normal_content_box.add_widget(widget)
-
-        self._remove_from_parent(self.start_button)
-        self.start_button.size_hint = (None, None)
-        self.start_button.width = dp(220)
-        if self.start_button not in self.normal_action_anchor.children:
-            self.normal_action_anchor.add_widget(self.start_button)
 
     def on_leave(self):
         app = get_app_state()
