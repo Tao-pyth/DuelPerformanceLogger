@@ -40,7 +40,7 @@
 - [Project Wiki Overview / プロジェクト概要](docs/wiki/Overview.md)
 
 ## Environment Requirements / 必要環境
-- **Python**: 3.10.x（動作確認済み）
+- **Python**: 3.10.x / 3.11.x（動作確認済み）
 - **Kivy**: 2.2.1（`requirements.txt` に固定）
 - **KivyMD**: 1.1.1（`requirements.txt` に固定）
 - Windows 10/11 または最新の Ubuntu（GitHub Actions CI で検証）
@@ -64,6 +64,11 @@
    pip install -r requirements-dev.txt
    pre-commit install
    ```
+
+## Verified Environment
+- Python 3.10 / 3.11
+- Kivy 2.2.1
+- KivyMD 1.1.1
 
 > `requirements.in` / `requirements-dev.in` を更新した場合は、 `pip-compile` でロックファイルを再生成してください。
 
