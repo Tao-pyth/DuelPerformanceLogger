@@ -54,6 +54,10 @@
   2. `resource/theme/gui/screens/FooScreen.kv` を作成し、`<FooScreen>:` ルートでレイアウトを記述する。
   3. `resource/theme/gui/app.kv` へ `#:include screens/FooScreen.kv` を追加する。
   4. `main.py` で `ScreenManager` に `FooScreen(name="foo")` を登録する。
+- Python クラスは状態・イベント処理のみを保持し、ウィジェットツリーやスタイルは KV ファイルへ集約します。`MatchEntryScreen` を参考
+  に、`BooleanProperty` や `ListProperty` で UI 状態を公開し、KV 側で `disabled:` や `text:` をバインドしてください。
+- 例: フィールド有効/無効を判定する場合は Python 側で `can_save = BooleanProperty(False)` を宣言し、KV で `disabled: not root.can_save`
+  と記述します。ロジック側でウィジェットを生成・追加する実装は避けてください。
 - スタイルを共通化したい場合は `styles/` に `.kv` を追加し、`app.kv` の include 順序（styles → components → screens）を守ります。
 - PyInstaller などでバンドルする際は、`--add-data "resource;resource"` を付与し、リソースが同梱されるようにしてください。
 

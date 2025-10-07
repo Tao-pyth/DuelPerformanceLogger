@@ -1,2 +1,23 @@
 #:kivy 2.2.1
-# Shared dialog layouts will be placed here.
+
+<ConfirmDialog@MDDialog>:
+    title_text: ""
+    message_text: ""
+    confirm_text: ""
+    cancel_text: ""
+    confirm_callback: lambda *_: None
+    cancel_callback: lambda *_: None
+    auto_dismiss: False
+    title: root.title_text
+    text: root.message_text
+    buttons:
+        [
+        MDFlatButton(
+            text=root.cancel_text,
+            on_release=lambda *_: (root.cancel_callback(), root.dismiss())
+        ),
+        MDRaisedButton(
+            text=root.confirm_text,
+            on_release=lambda *_: (root.confirm_callback(), root.dismiss())
+        ),
+        ]

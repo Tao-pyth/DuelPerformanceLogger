@@ -1,3 +1,117 @@
 #:kivy 2.2.1
+#:import dp kivy.metrics.dp
+
 <MatchSetupScreen>:
-    # Layout defined programmatically in function/screen/match_setup_screen.py
+    MDBoxLayout:
+        orientation: "vertical"
+
+        AppToolbar:
+            title: root.t("match_setup.header_title")
+            left_action_items: [["arrow-left", lambda x: root.change_screen("menu")]]
+            right_action_items: [["home", lambda x: root.change_screen("menu")]]
+            opacity: 0 if root.is_broadcast else 1
+            disabled: root.is_broadcast
+
+        MDScrollView:
+            opacity: 0 if root.is_broadcast else 1
+            disabled: root.is_broadcast
+
+            MDBoxLayout:
+                orientation: "vertical"
+                padding: (dp(24), dp(24), dp(24), dp(24))
+                spacing: dp(16)
+                size_hint_y: None
+                height: self.minimum_height
+
+                MDLabel:
+                    text: root.t("match_setup.count_label")
+                    font_style: "Subtitle1"
+
+                MDTextField:
+                    id: match_count_field_normal
+                    hint_text: root.t("match_setup.count_hint")
+                    input_filter: "int"
+
+                MDLabel:
+                    text: root.t("match_setup.deck_label")
+                    font_style: "Subtitle1"
+
+                PrimaryRaisedButton:
+                    id: deck_button_normal
+                    text: root.deck_button_label
+                    on_release: root.open_deck_menu()
+
+        MDBoxLayout:
+            padding: (dp(24), dp(12), dp(24), dp(24))
+            size_hint_y: None if not root.is_broadcast else 0
+            height: dp(72) if not root.is_broadcast else 0
+            opacity: 0 if root.is_broadcast else 1
+            disabled: root.is_broadcast
+
+            Widget:
+
+            PrimaryRaisedButton:
+                text: root.t("match_setup.start_button")
+                size_hint_x: None
+                width: dp(220)
+                on_release: root.start_entry()
+
+        MDBoxLayout:
+            orientation: "horizontal"
+            padding: dp(12)
+            spacing: dp(12)
+            size_hint_y: 1 if root.is_broadcast else 0
+            height: self.minimum_height if root.is_broadcast else 0
+            opacity: 1 if root.is_broadcast else 0
+            disabled: not root.is_broadcast
+
+            MDBoxLayout:
+                orientation: "vertical"
+                spacing: dp(12)
+                size_hint_x: None
+                width: dp(72)
+
+                MDIconButton:
+                    icon: "home"
+                    theme_text_color: "Custom"
+                    text_color: (0.18, 0.36, 0.58, 1)
+                    on_release: root.change_screen("menu")
+
+                MDIconButton:
+                    icon: "arrow-left"
+                    theme_text_color: "Custom"
+                    text_color: (0.18, 0.36, 0.58, 1)
+                    on_release: root.change_screen("menu")
+
+            MDBoxLayout:
+                orientation: "vertical"
+                spacing: dp(12)
+                padding: dp(12)
+                size_hint_x: 5
+
+                MDLabel:
+                    text: root.t("match_setup.count_label")
+                    font_style: "Subtitle1"
+
+                MDTextField:
+                    id: match_count_field_broadcast
+                    hint_text: root.t("match_setup.count_hint")
+                    input_filter: "int"
+
+                MDLabel:
+                    text: root.t("match_setup.deck_label")
+                    font_style: "Subtitle1"
+
+                PrimaryRaisedButton:
+                    id: deck_button_broadcast
+                    text: root.deck_button_label
+                    on_release: root.open_deck_menu()
+
+            MDBoxLayout:
+                orientation: "vertical"
+                padding: dp(12)
+                size_hint_x: 2
+
+                PrimaryRaisedButton:
+                    text: root.t("match_setup.start_button")
+                    on_release: root.start_entry()

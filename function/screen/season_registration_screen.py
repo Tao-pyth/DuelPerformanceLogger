@@ -6,12 +6,8 @@ import math
 from datetime import datetime
 from typing import Optional
 
-from kivy.metrics import dp
+from kivy.properties import StringProperty
 from kivymd.toast import toast
-from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.button import MDFlatButton, MDRaisedButton
-from kivymd.uix.label import MDLabel
-from kivymd.uix.textfield import MDTextField
 
 from function import DatabaseError, DuplicateEntryError
 from function.cmn_app_state import get_app_state
@@ -46,105 +42,22 @@ def days_until(target: datetime) -> int:
 class SeasonRegistrationScreen(BaseManagedScreen):
     """シーズン情報を新規登録するフォーム画面。"""
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    name_text = StringProperty("")
+    description_text = StringProperty("")
+    start_date_text = StringProperty("")
+    start_time_text = StringProperty("")
+    end_date_text = StringProperty("")
+    end_time_text = StringProperty("")
 
-        # 入力フォームの主要フィールドを準備。
-        self.name_field = MDTextField(
-            hint_text=get_text("season_registration.name_hint"),
-            helper_text=get_text("common.required_helper"),
-            helper_text_mode="on_focus",
-        )
-        self.description_field = MDTextField(
-            hint_text=get_text("season_registration.description_hint"),
-            multiline=True,
-            max_text_length=200,
-        )
-        self.start_date_field = MDTextField(
-            hint_text=get_text("season_registration.start_date_hint"),
-        )
-        self.start_time_field = MDTextField(
-            hint_text=get_text("season_registration.start_time_hint"),
-        )
-        self.end_date_field = MDTextField(
-            hint_text=get_text("season_registration.end_date_hint"),
-        )
-        self.end_time_field = MDTextField(
-            hint_text=get_text("season_registration.end_time_hint"),
-        )
-        (
-            self.root_layout,
-            content_anchor,
-            action_anchor,
-        ) = self._create_scaffold(
-            get_text("season_registration.header_title"),
-            lambda: self.change_screen("season_list"),
-            lambda: self.change_screen("menu"),
-        )
-
-        content_box = MDBoxLayout(
-            orientation="vertical",
-            spacing=dp(16),
-            padding=(dp(24), dp(24), dp(24), dp(24)),
-            size_hint=(0.95, 0.95),
-        )
-        content_box.add_widget(self.name_field)
-        content_box.add_widget(self.description_field)
-        content_box.add_widget(
-            MDLabel(
-                text=get_text("season_registration.schedule_section_title"),
-                theme_text_color="Secondary",
-            )
-        )
-
-        # 開始日時・終了日時の入力エリアを 2 行構成で配置。
-        schedule_box = MDBoxLayout(orientation="vertical", spacing=dp(12))
-
-        start_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(72))
-        for field in (self.start_date_field, self.start_time_field):
-            field.size_hint = (1, None)
-            field.height = dp(72)
-            start_row.add_widget(field)
-        schedule_box.add_widget(start_row)
-
-        end_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(72))
-        for field in (self.end_date_field, self.end_time_field):
-            field.size_hint = (1, None)
-            field.height = dp(72)
-            end_row.add_widget(field)
-        schedule_box.add_widget(end_row)
-
-        content_box.add_widget(schedule_box)
-        content_anchor.add_widget(content_box)
-
-        actions = MDBoxLayout(
-            orientation="horizontal",
-            spacing=dp(16),
-            size_hint=(0.6, None),
-            height=dp(48),
-        )
-        register_button = MDRaisedButton(
-            text=get_text("common.register"),
-            on_press=lambda *_: self.register_season(),
-        )
-        register_button.size_hint = (1, None)
-        register_button.height = dp(48)
-        back_button = MDFlatButton(
-            text=get_text("season_registration.back_to_list"),
-            on_press=lambda *_: self.change_screen("season_list"),
-        )
-        back_button.size_hint = (1, None)
-        back_button.height = dp(48)
-        actions.add_widget(back_button)
-        actions.add_widget(register_button)
-        action_anchor.add_widget(actions)
+    def on_kv_post(self, base_widget):
+        super().on_kv_post(base_widget)
         self.reset_form()
 
     def register_season(self):
         """フォーム内容を検証し、シーズンをデータベースへ保存する。"""
 
-        name = self.name_field.text.strip()
-        description = self.description_field.text.strip()
+        name = self.ids.name_field.text.strip()
+        description = self.ids.description_field.text.strip()
 
         if not name:
             toast(get_text("season_registration.toast_missing_name"))
@@ -156,10 +69,10 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             toast(get_text("common.db_error"))
             return
 
-        start_date = self.start_date_field.text.strip() or None
-        start_time = self.start_time_field.text.strip() or None
-        end_date = self.end_date_field.text.strip() or None
-        end_time = self.end_time_field.text.strip() or None
+        start_date = self.ids.start_date_field.text.strip() or None
+        start_time = self.ids.start_time_field.text.strip() or None
+        end_date = self.ids.end_date_field.text.strip() or None
+        end_time = self.ids.end_time_field.text.strip() or None
 
         try:
             db.add_season(
@@ -186,12 +99,19 @@ class SeasonRegistrationScreen(BaseManagedScreen):
     def reset_form(self):
         """入力内容を初期化し、次の登録に備える。"""
 
-        self.name_field.text = ""
-        self.description_field.text = ""
-        self.start_date_field.text = ""
-        self.start_time_field.text = ""
-        self.end_date_field.text = ""
-        self.end_time_field.text = ""
+        self.ids.name_field.text = ""
+        self.ids.description_field.text = ""
+        self.ids.start_date_field.text = ""
+        self.ids.start_time_field.text = ""
+        self.ids.end_date_field.text = ""
+        self.ids.end_time_field.text = ""
+
+        self.name_text = ""
+        self.description_text = ""
+        self.start_date_text = ""
+        self.start_time_text = ""
+        self.end_date_text = ""
+        self.end_time_text = ""
 
 
 __all__ = [
