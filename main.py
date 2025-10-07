@@ -53,8 +53,25 @@ if system() == "Windows":
 
 
 class DeckAnalyzerApp(MDApp):
+    """デュエル戦績管理アプリの KivyMD アプリケーションクラス。
+
+    入力
+        インスタンス生成時に特別な引数は必要ありません。
+    出力
+        :class:`MDApp` を継承したアプリケーションとして、画面遷移や DB 管理を
+        司るメソッドを提供します。
+    """
+
     def build(self):
-        """KivyMD アプリ起動時に呼び出される初期化処理。"""
+        """アプリ起動時に UI 構築と初期データ読み込みを行います。
+
+        入力
+            追加の引数はありません。インスタンス属性を初期化します。
+        出力
+            ``MDScreenManager``
+                画面を集約したマネージャを返し、Kivy がルートウィジェットとして
+                使用します。
+        """
 
         # テーマカラーなど、見た目に関する初期設定を行う。
         self.theme_cls.primary_palette = "BlueGray"
@@ -129,7 +146,17 @@ class DeckAnalyzerApp(MDApp):
         return screen_manager
 
     def _handle_version_mismatch(self, current_version: int, expected_version: int) -> str:
-        """DB バージョン不一致時の処理フローをまとめたヘルパー。"""
+        """DB バージョン不一致時の対処処理を実行し、結果メッセージを返します。
+
+        入力
+            current_version: ``int``
+                現在の DB スキーマバージョン。
+            expected_version: ``int``
+                コンフィグで想定される最新バージョン。
+        出力
+            ``str``
+                バックアップや復元処理の結果を画面表示用にまとめた文字列。
+        """
 
         # まず画面へ表示するメッセージ（ログ）を格納するリストを用意する。
         lines = [
