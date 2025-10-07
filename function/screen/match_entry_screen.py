@@ -7,7 +7,6 @@ from typing import Optional
 
 from kivy.clock import Clock
 from kivy.metrics import dp
-from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 from kivy.core.window import Window
 from kivymd.toast import toast
@@ -116,7 +115,7 @@ class MatchEntryScreen(BaseManagedScreen):
         self.status_label = MDLabel(
             text=get_text("match_entry.status_default"),
             halign="center",
-            font_style="H5",
+            font_style="H6",
         )
         self._configure_label(self.status_label)
 
@@ -140,29 +139,15 @@ class MatchEntryScreen(BaseManagedScreen):
         self.keyword_field.size_hint = (1, None)
         self.keyword_field.height = dp(72)
 
-        self.normal_scroll = ScrollView(size_hint=(0.95, 0.95))
-        self.normal_content = MDBoxLayout(
-            orientation="vertical",
+        self.normal_layout = MDBoxLayout(
+            orientation="horizontal",
             spacing=dp(16),
             padding=(dp(24), dp(24), dp(24), dp(24)),
-            size_hint_y=None,
+            size_hint=(0.95, 0.95),
         )
-        self.normal_content.bind(minimum_height=self.normal_content.setter("height"))
-        self.normal_scroll.add_widget(self.normal_content)
-        normal_content_anchor.add_widget(self.normal_scroll)
+        normal_content_anchor.add_widget(self.normal_layout)
 
         self.last_record_card = self._build_last_record_card()
-
-        self.turn_prompt_label = MDLabel(
-            text=get_text("match_entry.turn_prompt"),
-            theme_text_color="Secondary",
-        )
-        self._configure_label(self.turn_prompt_label)
-        self.result_prompt_label = MDLabel(
-            text=get_text("match_entry.result_prompt"),
-            theme_text_color="Secondary",
-        )
-        self._configure_label(self.result_prompt_label)
 
         self.turn_container_normal = MDBoxLayout(
             orientation="horizontal",
@@ -212,50 +197,105 @@ class MatchEntryScreen(BaseManagedScreen):
             self.set_result_choice,
         )
 
-        self.normal_content_widgets = [
-            self.clock_label,
-            self.match_info_label,
-            self.status_label,
-            self.last_record_card,
-            self.turn_prompt_label,
-            self.turn_container_normal,
-            self.opponent_section,
-            self.result_prompt_label,
-            self.result_container_normal,
-        ]
-        for widget in self.normal_content_widgets:
-            self.normal_content.add_widget(widget)
-
-        self.quick_actions = MDBoxLayout(
-            orientation="horizontal",
-            spacing=dp(12),
-            size_hint=(0.85, None),
-            height=dp(48),
-        )
-        self.clear_button = MDFlatButton(
-            text=get_text("match_entry.clear_button"),
-            on_press=lambda *_: self.reset_inputs(focus_opponent=True),
-        )
-        self.record_button = MDRaisedButton(
-            text=get_text("match_entry.record_button"),
-            on_press=lambda *_: self.submit_match(),
+        self.home_button = MDFlatButton(
+            text=get_text("common.return_to_top"),
+            on_press=lambda *_: self.change_screen("menu"),
         )
         self.back_button = MDFlatButton(
             text=get_text("match_entry.back_button"),
             on_press=lambda *_: self.change_screen("match_setup"),
         )
-        for button in (self.clear_button, self.record_button, self.back_button):
+        self.record_button = MDRaisedButton(
+            text=get_text("match_entry.record_button"),
+            on_press=lambda *_: self.submit_match(),
+        )
+        self.clear_button = MDFlatButton(
+            text=get_text("match_entry.clear_button"),
+            on_press=lambda *_: self.reset_inputs(focus_opponent=True),
+        )
+        for button in (
+            self.home_button,
+            self.back_button,
+            self.record_button,
+            self.clear_button,
+        ):
             button.size_hint = (1, None)
             button.height = dp(48)
-        self.quick_actions.add_widget(self.clear_button)
-        self.quick_actions.add_widget(self.record_button)
-        self.quick_actions.add_widget(self.back_button)
-        normal_action_anchor.add_widget(self.quick_actions)
-        self.quick_action_buttons = [
-            self.clear_button,
-            self.record_button,
-            self.back_button,
-        ]
+
+        self.left_nav_column = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=0.1,
+        )
+        self.left_nav_column.add_widget(self.home_button)
+        self.left_nav_column.add_widget(self.back_button)
+
+        self.center_column = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(16),
+            size_hint_x=0.8,
+        )
+
+        self.center_top_box = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_y=0.4,
+        )
+        self.center_top_box.add_widget(self.clock_label)
+        self.center_top_box.add_widget(self.match_info_label)
+        self.center_top_box.add_widget(self.status_label)
+        self.center_top_box.add_widget(self.last_record_card)
+
+        self.center_bottom_box = MDBoxLayout(
+            orientation="horizontal",
+            spacing=dp(16),
+            size_hint_y=0.6,
+        )
+
+        self.turn_section_anchor = MDAnchorLayout(
+            anchor_x="center",
+            anchor_y="center",
+            size_hint=(0.3, 1),
+        )
+        self.turn_container_normal.size_hint = (1, None)
+        self.turn_section_anchor.add_widget(self.turn_container_normal)
+
+        self.deck_section_anchor = MDAnchorLayout(
+            anchor_x="center",
+            anchor_y="center",
+            size_hint=(0.4, 1),
+        )
+        self.opponent_section.size_hint = (1, None)
+        self.deck_section_anchor.add_widget(self.opponent_section)
+
+        self.result_section_anchor = MDAnchorLayout(
+            anchor_x="center",
+            anchor_y="center",
+            size_hint=(0.3, 1),
+        )
+        self.result_container_normal.size_hint = (1, None)
+        self.result_section_anchor.add_widget(self.result_container_normal)
+
+        self.center_bottom_box.add_widget(self.turn_section_anchor)
+        self.center_bottom_box.add_widget(self.deck_section_anchor)
+        self.center_bottom_box.add_widget(self.result_section_anchor)
+
+        self.center_column.add_widget(self.center_top_box)
+        self.center_column.add_widget(self.center_bottom_box)
+
+        self.right_action_column = MDBoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            size_hint_x=0.1,
+        )
+        self.right_action_column.add_widget(self.record_button)
+        self.right_action_column.add_widget(self.clear_button)
+
+        self.normal_layout.add_widget(self.left_nav_column)
+        self.normal_layout.add_widget(self.center_column)
+        self.normal_layout.add_widget(self.right_action_column)
+
+        normal_action_anchor.add_widget(Widget())
 
         self.broadcast_layout = self._build_broadcast_layout()
         self._update_toggle_style(self.turn_buttons, None)
@@ -344,12 +384,6 @@ class MatchEntryScreen(BaseManagedScreen):
             button.bind(on_release=make_callback(value))
             container.add_widget(button)
             collection.append(button)
-
-    def _ensure_normal_content_order(self) -> None:
-        for widget in self.normal_content_widgets:
-            self._remove_from_parent(widget)
-        for widget in self.normal_content_widgets:
-            self.normal_content.add_widget(widget)
 
     def _build_broadcast_layout(self) -> MDBoxLayout:
         layout = MDBoxLayout(
@@ -637,18 +671,26 @@ class MatchEntryScreen(BaseManagedScreen):
         if not self.normal_root.parent:
             self.add_widget(self.normal_root)
 
-        self._remove_from_parent(self.opponent_section)
-        self._ensure_normal_content_order()
-
         if hasattr(self, "broadcast_buttons_column"):
             self.broadcast_buttons_column.clear_widgets()
 
-        self.quick_actions.clear_widgets()
-        for button in (self.clear_button, self.record_button, self.back_button):
+        self._remove_from_parent(self.opponent_section)
+        self.deck_section_anchor.add_widget(self.opponent_section)
+
+        for column in (self.left_nav_column, self.right_action_column):
+            column.clear_widgets()
+
+        for button in (self.home_button, self.back_button):
             self._remove_from_parent(button)
             button.size_hint = (1, None)
             button.height = dp(48)
-            self.quick_actions.add_widget(button)
+            self.left_nav_column.add_widget(button)
+
+        for button in (self.record_button, self.clear_button):
+            self._remove_from_parent(button)
+            button.size_hint = (1, None)
+            button.height = dp(48)
+            self.right_action_column.add_widget(button)
 
     def _update_status_summary(self, count: int, deck_name: str) -> None:
         # summary = get_text("match_entry.status_summary").format(
