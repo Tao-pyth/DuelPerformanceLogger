@@ -1,3 +1,182 @@
 #:kivy 2.2.1
+
 <MatchEntryScreen>:
-    # Layout defined programmatically in function/screen/match_entry_screen.py
+    MDBoxLayout:
+        orientation: "vertical"
+
+        MDToolbar:
+            title: root.title or (app.t("match_entry.title") if hasattr(app, "t") else "対戦結果の入力")
+            left_action_items: [["arrow-left", lambda x: root.go_to_setup()]]
+            right_action_items: [["home", lambda x: root.go_to_menu()]]
+
+        MDScrollView:
+            MDBoxLayout:
+                orientation: "vertical"
+                padding: "24dp"
+                spacing: "16dp"
+                size_hint_y: None
+                height: self.minimum_height
+
+                MDLabel:
+                    text: root.status_message
+                    halign: "center"
+                    theme_text_color: "Primary"
+
+                MDLabel:
+                    text: root.match_info
+                    halign: "center"
+                    theme_text_color: "Secondary"
+
+                MDCard:
+                    orientation: "vertical"
+                    padding: "20dp"
+                    spacing: "16dp"
+                    size_hint_y: None
+                    height: self.minimum_height
+                    disabled: root.busy
+                    opacity: 0.5 if root.busy else 1
+
+                    MDLabel:
+                        text: app.t("match_entry.turn_title") if hasattr(app, "t") else "先攻/後攻"
+                        font_style: "Subtitle1"
+
+                    MDBoxLayout:
+                        spacing: "8dp"
+                        adaptive_height: True
+
+                        MDRaisedButton:
+                            text: root.turn_options[0][0] if len(root.turn_options) > 0 else ""
+                            on_release: root.set_turn(root.turn_options[0][1]) if len(root.turn_options) > 0 else None
+                            disabled: len(root.turn_options) <= 0
+                            opacity: 1 if len(root.turn_options) > 0 else 0
+                            md_bg_color: root.button_bg_color(root.turn, root.turn_options[0][1]) if len(root.turn_options) > 0 else root.button_bg_color(None, None)
+                            text_color: root.button_text_color(root.turn, root.turn_options[0][1]) if len(root.turn_options) > 0 else root.button_text_color(None, None)
+
+                        MDRaisedButton:
+                            text: root.turn_options[1][0] if len(root.turn_options) > 1 else ""
+                            on_release: root.set_turn(root.turn_options[1][1]) if len(root.turn_options) > 1 else None
+                            disabled: len(root.turn_options) <= 1
+                            opacity: 1 if len(root.turn_options) > 1 else 0
+                            md_bg_color: root.button_bg_color(root.turn, root.turn_options[1][1]) if len(root.turn_options) > 1 else root.button_bg_color(None, None)
+                            text_color: root.button_text_color(root.turn, root.turn_options[1][1]) if len(root.turn_options) > 1 else root.button_text_color(None, None)
+
+                        MDRaisedButton:
+                            text: root.turn_options[2][0] if len(root.turn_options) > 2 else ""
+                            on_release: root.set_turn(root.turn_options[2][1]) if len(root.turn_options) > 2 else None
+                            disabled: len(root.turn_options) <= 2
+                            opacity: 1 if len(root.turn_options) > 2 else 0
+                            md_bg_color: root.button_bg_color(root.turn, root.turn_options[2][1]) if len(root.turn_options) > 2 else root.button_bg_color(None, None)
+                            text_color: root.button_text_color(root.turn, root.turn_options[2][1]) if len(root.turn_options) > 2 else root.button_text_color(None, None)
+
+                    MDSeparator:
+
+                    MDLabel:
+                        text: app.t("match_entry.opponent_title") if hasattr(app, "t") else "対戦相手"
+                        font_style: "Subtitle1"
+
+                    MDBoxLayout:
+                        spacing: "12dp"
+                        adaptive_height: True
+
+                        MDTextField:
+                            id: opponent
+                            hint_text: app.t("match_entry.opponent_hint") if hasattr(app, "t") else "対戦相手デッキ"
+                            on_text: root._recalc()
+                            helper_text_mode: "persistent"
+                            helper_text: app.t("match_entry.opponent_helper") if hasattr(app, "t") else "入力で検索、またはリストから選択"
+                            size_hint_x: 1
+
+                        MDIconButton:
+                            id: opponent_menu_button
+                            icon: "chevron-down"
+                            on_release: root.open_opponent_menu()
+
+                    MDTextField:
+                        id: keywords
+                        hint_text: app.t("match_entry.keyword_hint") if hasattr(app, "t") else "キーワード (カンマ区切り)"
+                        multiline: True
+                        on_text: root._recalc()
+
+                    MDSeparator:
+
+                    MDLabel:
+                        text: app.t("match_entry.result_title") if hasattr(app, "t") else "勝敗"
+                        font_style: "Subtitle1"
+
+                    MDBoxLayout:
+                        spacing: "8dp"
+                        adaptive_height: True
+
+                        MDRaisedButton:
+                            text: root.result_options[0][0] if len(root.result_options) > 0 else ""
+                            on_release: root.set_result(root.result_options[0][1]) if len(root.result_options) > 0 else None
+                            disabled: len(root.result_options) <= 0
+                            opacity: 1 if len(root.result_options) > 0 else 0
+                            md_bg_color: root.button_bg_color(root.result, root.result_options[0][1]) if len(root.result_options) > 0 else root.button_bg_color(None, None)
+                            text_color: root.button_text_color(root.result, root.result_options[0][1]) if len(root.result_options) > 0 else root.button_text_color(None, None)
+
+                        MDRaisedButton:
+                            text: root.result_options[1][0] if len(root.result_options) > 1 else ""
+                            on_release: root.set_result(root.result_options[1][1]) if len(root.result_options) > 1 else None
+                            disabled: len(root.result_options) <= 1
+                            opacity: 1 if len(root.result_options) > 1 else 0
+                            md_bg_color: root.button_bg_color(root.result, root.result_options[1][1]) if len(root.result_options) > 1 else root.button_bg_color(None, None)
+                            text_color: root.button_text_color(root.result, root.result_options[1][1]) if len(root.result_options) > 1 else root.button_text_color(None, None)
+
+                        MDRaisedButton:
+                            text: root.result_options[2][0] if len(root.result_options) > 2 else ""
+                            on_release: root.set_result(root.result_options[2][1]) if len(root.result_options) > 2 else None
+                            disabled: len(root.result_options) <= 2
+                            opacity: 1 if len(root.result_options) > 2 else 0
+                            md_bg_color: root.button_bg_color(root.result, root.result_options[2][1]) if len(root.result_options) > 2 else root.button_bg_color(None, None)
+                            text_color: root.button_text_color(root.result, root.result_options[2][1]) if len(root.result_options) > 2 else root.button_text_color(None, None)
+
+                        MDRaisedButton:
+                            text: root.result_options[3][0] if len(root.result_options) > 3 else ""
+                            on_release: root.set_result(root.result_options[3][1]) if len(root.result_options) > 3 else None
+                            disabled: len(root.result_options) <= 3
+                            opacity: 1 if len(root.result_options) > 3 else 0
+                            md_bg_color: root.button_bg_color(root.result, root.result_options[3][1]) if len(root.result_options) > 3 else root.button_bg_color(None, None)
+                            text_color: root.button_text_color(root.result, root.result_options[3][1]) if len(root.result_options) > 3 else root.button_text_color(None, None)
+
+                    MDBoxLayout:
+                        spacing: "12dp"
+                        adaptive_height: True
+
+                        MDFillRoundFlatIconButton:
+                            id: btn_save
+                            text: app.t("common.save") if hasattr(app, "t") else "保存"
+                            icon: "content-save"
+                            on_release: root.save()
+                            disabled: not root.can_save
+
+                        MDFlatButton:
+                            text: app.t("common.clear") if hasattr(app, "t") else "クリア"
+                            on_release: root.clear_inputs()
+
+                MDCard:
+                    orientation: "vertical"
+                    padding: "20dp"
+                    spacing: "12dp"
+                    size_hint_y: None
+                    height: self.minimum_height
+
+                    MDLabel:
+                        text: app.t("match_entry.last_record_title") if hasattr(app, "t") else "最新の記録"
+                        font_style: "Subtitle1"
+
+                    MDLabel:
+                        text: root.last_record_text
+                        theme_text_color: "Secondary"
+                        text_size: self.width, None
+                        size_hint_y: None
+                        height: self.texture_size[1]
+
+                    MDBoxLayout:
+                        adaptive_height: True
+                        Widget:
+                        MDFlatButton:
+                            id: copy_last_button
+                            text: app.t("match_entry.copy_last_button") if hasattr(app, "t") else "前回の内容をコピー"
+                            disabled: not root.last_record_available
+                            on_release: root.copy_last_record()
