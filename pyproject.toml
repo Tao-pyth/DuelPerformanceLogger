@@ -5,7 +5,8 @@ src = ["function", "main.py"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "TID"]
 
-[tool.ruff.lint.banned-api]
+# ▼ ここを修正（"banned-api" → "flake8-banned-api"）
+[tool.ruff.lint.flake8-banned-api]
 "kivymd.uix.iconbutton" = { msg = "Import MDIconButton from kivymd.uix.button" }
 
 [tool.ruff.lint.isort]
