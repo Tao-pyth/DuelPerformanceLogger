@@ -13,6 +13,8 @@ from platform import system
 
 from kivy.core.text import LabelBase, DEFAULT_FONT
 from kivy.core.window import Window
+from kivy.lang import Builder
+from kivy.resources import resource_add_path
 from kivymd.app import MDApp
 from kivymd.uix.screenmanager import MDScreenManager
 
@@ -50,6 +52,30 @@ if system() == "Windows":
         if font_path.exists():
             LabelBase.register(DEFAULT_FONT, str(font_path))
             break
+
+
+_GUI_ROOT = Path(__file__).resolve().parent / "resource" / "theme" / "gui"
+
+
+def _load_gui_definitions() -> None:
+    """Load kv definitions from the centralized GUI directory."""
+
+    resource_add_path(str(_GUI_ROOT))
+
+    app_kv = _GUI_ROOT / "app.kv"
+    if app_kv.exists():
+        Builder.load_file(str(app_kv))
+        return
+
+    for subdirectory in ("styles", "components", "screens"):
+        directory_path = _GUI_ROOT / subdirectory
+        if not directory_path.exists():
+            continue
+        for kv_path in sorted(directory_path.glob("*.kv")):
+            Builder.load_file(str(kv_path))
+
+
+_load_gui_definitions()
 
 
 class DeckAnalyzerApp(MDApp):

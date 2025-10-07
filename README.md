@@ -39,6 +39,24 @@
 ## Documentation Links / ドキュメントリンク
 - [Project Wiki Overview / プロジェクト概要](docs/wiki/Overview.md)
 
+## GUI Layout Guidelines / GUI 配置ルール
+- すべての `.kv` ファイルは `resource/theme/gui/` 配下に集約します。構成は次のとおりです。
+  ```text
+  resource/theme/gui/
+  ├── app.kv             # includes styles → components → screens
+  ├── styles/            # トークン・タイポグラフィ等のスタイル定義
+  ├── components/        # 複数画面で共有するウィジェット
+  └── screens/           # 画面クラス名と 1:1 に対応する kv
+  ```
+- `screens/` 内のファイル名は Python 側のクラス名と一致させ、`<ClassName>:` から始めます。
+- 新しい画面を追加する際は次の手順に従います。
+  1. `function/screen/FooScreen.py` に `class FooScreen(MDScreen)` を定義する。
+  2. `resource/theme/gui/screens/FooScreen.kv` を作成し、`<FooScreen>:` ルートでレイアウトを記述する。
+  3. `resource/theme/gui/app.kv` へ `#:include screens/FooScreen.kv` を追加する。
+  4. `main.py` で `ScreenManager` に `FooScreen(name="foo")` を登録する。
+- スタイルを共通化したい場合は `styles/` に `.kv` を追加し、`app.kv` の include 順序（styles → components → screens）を守ります。
+- PyInstaller などでバンドルする際は、`--add-data "resource;resource"` を付与し、リソースが同梱されるようにしてください。
+
 ## Environment Requirements / 必要環境
 - **Python**: 3.10.x（動作確認済み）
 - **Kivy**: 2.2.1（`requirements.txt` に固定）
