@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from platform import system
 
 from kivy.core.text import LabelBase, DEFAULT_FONT
 from kivy.core.window import Window
@@ -23,9 +25,17 @@ from function.screen.season_registration_screen import SeasonRegistrationScreen
 from function.screen.settings_screen import SettingsScreen
 from function.screen.stats_screen import StatsScreen
 
-_FONT_PATH = Path(__file__).resolve().parent / "resource" / "theme" / "font" / "mgenplus-1c-regular.ttf"
-if _FONT_PATH.exists():
-    LabelBase.register(DEFAULT_FONT, str(_FONT_PATH))
+if system() == "Windows":
+    _system_root = Path(os.environ.get("SystemRoot", "C:/Windows"))
+    font_candidates = [
+        _system_root / "Fonts" / "YuGothicUIRegular.ttf",
+        _system_root / "Fonts" / "msgothic.ttc",
+        _system_root / "Fonts" / "meiryo.ttc",
+    ]
+    for font_path in font_candidates:
+        if font_path.exists():
+            LabelBase.register(DEFAULT_FONT, str(font_path))
+            break
 
 
 class DeckAnalyzerApp(MDApp):
