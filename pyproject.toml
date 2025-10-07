@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 100
+src = ["function", "main.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "TID"]
+
+[tool.ruff.lint.banned-api]
+"kivymd.uix.iconbutton" = { msg = "Import MDIconButton from kivymd.uix.button" }
+
+[tool.ruff.lint.isort]
+known-first-party = ["function"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,14 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.11
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: forbid-kivymd-iconbutton-import
+        name: Prevent invalid kivymd.uix.iconbutton imports
+        entry: bash -c 'if grep -R "kivymd\\.uix\\.iconbutton" -n; then echo "Forbidden import path detected. Use kivymd.uix.button instead."; exit 1; fi'
+        language: system
+        pass_filenames: false
