@@ -76,7 +76,10 @@ RESULT_VALUE_TO_LABEL = {value: label for label, value in RESULT_OPTIONS}
 
 
 class MatchEntryScreen(BaseManagedScreen):
+    screen_mode = "normal"
+
     def __init__(self, **kwargs):
+        self.screen_mode = getattr(self.__class__, "screen_mode", "normal")
         super().__init__(**kwargs)
         self.turn_choice: Optional[bool] = None
         self.result_choice: Optional[int] = None
@@ -84,7 +87,7 @@ class MatchEntryScreen(BaseManagedScreen):
         self.result_buttons: list[MDRectangleFlatButton] = []
         self.last_record_data = None
         self._clock_event = None
-        self._active_mode = "normal"
+        self._active_mode = self.screen_mode
 
         (
             self.normal_root,
@@ -440,19 +443,12 @@ class MatchEntryScreen(BaseManagedScreen):
         )
         layout.add_widget(self.result_container_broadcast)
 
-        self.broadcast_actions_section = MDBoxLayout(
+        self.broadcast_buttons_column = MDBoxLayout(
             orientation="vertical",
             spacing=dp(12),
             size_hint_x=1,
         )
-        layout.add_widget(self.broadcast_actions_section)
-
-        self.broadcast_record_section = MDBoxLayout(
-            orientation="vertical",
-            spacing=dp(12),
-            size_hint_x=1,
-        )
-        layout.add_widget(self.broadcast_record_section)
+        layout.add_widget(self.broadcast_buttons_column)
 
         return layout
 
@@ -628,18 +624,12 @@ class MatchEntryScreen(BaseManagedScreen):
         self._remove_from_parent(self.opponent_section)
         self.broadcast_deck_section.add_widget(self.opponent_section)
 
-        self.broadcast_actions_section.clear_widgets()
-        for button in (self.clear_button, self.back_button):
+        self.broadcast_buttons_column.clear_widgets()
+        for button in (self.record_button, self.clear_button, self.back_button):
             self._remove_from_parent(button)
             button.size_hint = (1, None)
             button.height = dp(48)
-            self.broadcast_actions_section.add_widget(button)
-
-        self.broadcast_record_section.clear_widgets()
-        self._remove_from_parent(self.record_button)
-        self.record_button.size_hint = (1, None)
-        self.record_button.height = dp(48)
-        self.broadcast_record_section.add_widget(self.record_button)
+            self.broadcast_buttons_column.add_widget(button)
 
     def _show_normal_layout(self) -> None:
         if self.broadcast_layout.parent:
@@ -650,8 +640,8 @@ class MatchEntryScreen(BaseManagedScreen):
         self._remove_from_parent(self.opponent_section)
         self._ensure_normal_content_order()
 
-        self.broadcast_actions_section.clear_widgets()
-        self.broadcast_record_section.clear_widgets()
+        if hasattr(self, "broadcast_buttons_column"):
+            self.broadcast_buttons_column.clear_widgets()
 
         self.quick_actions.clear_widgets()
         for button in (self.clear_button, self.record_button, self.back_button):
@@ -683,7 +673,10 @@ class MatchEntryScreen(BaseManagedScreen):
         if hasattr(self, "match_info_label"):
             self.match_info_label.text = info_text
         if hasattr(self, "broadcast_match_info_label"):
-            self.broadcast_match_info_label.text = info_text
+            if self._active_mode == "broadcast":
+                self.broadcast_match_info_label.text = ""
+            else:
+                self.broadcast_match_info_label.text = info_text
         self._update_match_info_visibility(self._active_mode)
 
     def _update_match_info_visibility(self, mode: str) -> None:
@@ -775,7 +768,7 @@ class MatchEntryScreen(BaseManagedScreen):
     def on_pre_enter(self):
         self._start_clock()
         app = get_app_state()
-        mode = getattr(app, "ui_mode", "normal")
+        mode = self.screen_mode or getattr(app, "ui_mode", "normal")
         self._apply_mode_layout(mode)
         self._sync_window_size(mode)
         settings = getattr(app, "current_match_settings", None)
@@ -798,7 +791,7 @@ class MatchEntryScreen(BaseManagedScreen):
     def on_leave(self):
         self._stop_clock()
         app = get_app_state()
-        if getattr(app, "ui_mode", "normal") != "broadcast":
+        if self.screen_mode != "broadcast":
             default_size = getattr(app, "default_window_size", None)
             if default_size:
                 Window.size = default_size
@@ -824,8 +817,13 @@ class MatchEntryScreen(BaseManagedScreen):
             self._clock_event = None
 
 
+class MatchEntryBroadcastScreen(MatchEntryScreen):
+    screen_mode = "broadcast"
+
+
 __all__ = [
     "MatchEntryScreen",
+    "MatchEntryBroadcastScreen",
     "TURN_OPTIONS",
     "TURN_VALUE_TO_LABEL",
     "RESULT_OPTIONS",

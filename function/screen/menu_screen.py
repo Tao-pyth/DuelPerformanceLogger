@@ -17,7 +17,7 @@ from kivymd.uix.screen import MDScreen
 from function.cmn_app_state import get_app_state
 from function.cmn_resources import get_text
 
-from .base import build_header
+from .base import build_header, resolve_screen_name
 
 
 class MenuScreen(MDScreen):
@@ -222,7 +222,8 @@ class MenuScreen(MDScreen):
 
     def change_screen(self, screen_name):
         if self.manager:
-            self.manager.current = screen_name
+            resolved = resolve_screen_name(screen_name)
+            self.manager.current = resolved
 
 
 __all__ = ["MenuScreen"]

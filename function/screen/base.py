@@ -17,6 +17,18 @@ from function.cmn_app_state import get_app_state
 from function.cmn_resources import get_text
 
 
+def resolve_screen_name(screen_name: str, *, mode: str | None = None) -> str:
+    """Resolve the actual screen name based on the current UI mode."""
+
+    if screen_name in {"match_setup", "match_entry"}:
+        if mode is None:
+            app = get_app_state()
+            mode = getattr(app, "ui_mode", "normal")
+        if mode == "broadcast":
+            return f"{screen_name}_broadcast"
+    return screen_name
+
+
 def build_header(title, back_callback=None, top_callback=None):
     """アプリ画面上部のヘッダーを生成する共通ユーティリティ."""
 
@@ -125,7 +137,9 @@ class BaseManagedScreen(MDScreen):
         """Navigate to the target screen if available."""
 
         if self.manager:
-            self.manager.current = screen_name
+            mode_hint = getattr(self, "screen_mode", None)
+            resolved = resolve_screen_name(screen_name, mode=mode_hint)
+            self.manager.current = resolved
 
     def _sync_window_size(self, mode: str) -> None:
         """Adjust the window size according to the given mode."""
@@ -142,4 +156,4 @@ class BaseManagedScreen(MDScreen):
             Window.size = target_size
 
 
-__all__ = ["BaseManagedScreen", "build_header"]
+__all__ = ["BaseManagedScreen", "build_header", "resolve_screen_name"]

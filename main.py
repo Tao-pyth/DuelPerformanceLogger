@@ -17,8 +17,14 @@ from function.cmn_config import load_config
 from function.cmn_logger import log_db_error
 from function.cmn_resources import get_text
 from function.screen.deck_registration_screen import DeckRegistrationScreen
-from function.screen.match_entry_screen import MatchEntryScreen
-from function.screen.match_setup_screen import MatchSetupScreen
+from function.screen.match_entry_screen import (
+    MatchEntryBroadcastScreen,
+    MatchEntryScreen,
+)
+from function.screen.match_setup_screen import (
+    MatchSetupBroadcastScreen,
+    MatchSetupScreen,
+)
 from function.screen.menu_screen import MenuScreen
 from function.screen.season_list_screen import SeasonListScreen
 from function.screen.season_registration_screen import SeasonRegistrationScreen
@@ -91,7 +97,13 @@ class DeckAnalyzerApp(MDApp):
         screen_manager.add_widget(SeasonListScreen(name="season_list"))
         screen_manager.add_widget(SeasonRegistrationScreen(name="season_register"))
         screen_manager.add_widget(MatchSetupScreen(name="match_setup"))
+        screen_manager.add_widget(
+            MatchSetupBroadcastScreen(name="match_setup_broadcast")
+        )
         screen_manager.add_widget(MatchEntryScreen(name="match_entry"))
+        screen_manager.add_widget(
+            MatchEntryBroadcastScreen(name="match_entry_broadcast")
+        )
         screen_manager.add_widget(StatsScreen(name="stats"))
         screen_manager.add_widget(SettingsScreen(name="settings"))
         return screen_manager
