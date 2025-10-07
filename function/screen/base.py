@@ -17,9 +17,16 @@ from function.cmn_app_state import get_app_state
 from function.cmn_resources import get_text
 
 
+# NOTE: 複数画面で共通となる UI 部品・挙動をまとめた基底モジュールです。
+# 画面上部のヘッダー生成や、画面遷移ヘルパー、ウィンドウサイズの調整など
+# 初心者がつまずきがちな処理を関数化しています。
+
+
 def resolve_screen_name(screen_name: str, *, mode: str | None = None) -> str:
     """Resolve the actual screen name based on the current UI mode."""
 
+    # マッチ入力画面には通常版と配信向け（broadcast）版があるため、UI モードに
+    # 応じて遷移先の名前を切り替える。モードが指定されなければアプリ状態を参照。
     if screen_name in {"match_setup", "match_entry"}:
         if mode is None:
             app = get_app_state()
@@ -32,6 +39,7 @@ def resolve_screen_name(screen_name: str, *, mode: str | None = None) -> str:
 def build_header(title, back_callback=None, top_callback=None):
     """アプリ画面上部のヘッダーを生成する共通ユーティリティ."""
 
+    # タイトルや戻るボタンを並べる横方向レイアウトを組み立てる。
     header = MDBoxLayout(
         orientation="horizontal",
         size_hint_y=None,
@@ -80,6 +88,7 @@ def build_header(title, back_callback=None, top_callback=None):
         right_spacer = Widget(size_hint_x=None, width=action_box.width)
 
         def _sync_width(instance, value):  # type: ignore[unused-arg]
+            # 左側のボタン群の幅に合わせて右側のスペーサーを同期する。
             right_spacer.width = value
 
         action_box.bind(width=_sync_width)
@@ -108,6 +117,7 @@ class BaseManagedScreen(MDScreen):
         *,
         action_anchor_x: str = "center",
     ):
+        # 共通の 3 分割レイアウト（ヘッダー / メイン / アクション）を生成する。
         root = MDBoxLayout(orientation="vertical")
 
         title_anchor = MDAnchorLayout(
@@ -147,6 +157,7 @@ class BaseManagedScreen(MDScreen):
         app = get_app_state()
         default_size = getattr(app, "default_window_size", Window.size)
 
+        # 配信モードでは横長・低さの専用レイアウトへリサイズする。
         if mode == "broadcast":
             target_size = (1080, 280)
         else:

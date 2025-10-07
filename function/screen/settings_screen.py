@@ -20,6 +20,8 @@ from .base import BaseManagedScreen
 
 
 class SettingsScreen(BaseManagedScreen):
+    """アプリ全体の設定（UI モード、バックアップ等）を扱う画面。"""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.confirm_dialog: MDDialog | None = None
@@ -36,6 +38,7 @@ class SettingsScreen(BaseManagedScreen):
             lambda: self.change_screen("menu"),
         )
 
+        # 設定項目を縦に並べるスクロールコンテナを構築。
         self.settings_scroll = ScrollView(size_hint=(0.95, 0.95))
         self.settings_container = MDBoxLayout(
             orientation="vertical",
@@ -61,12 +64,15 @@ class SettingsScreen(BaseManagedScreen):
         action_anchor.add_widget(exit_button)
 
     def on_pre_enter(self):
+        # 現在の UI モードとバックアップ日時を画面表示に反映。
         app = get_app_state()
         mode = getattr(app, "ui_mode", "normal")
         self._update_mode_buttons(mode)
         self._update_backup_label()
 
     def _build_database_section(self):
+        """バックアップや初期化操作をまとめたカードを生成。"""
+
         card = MDCard(
             orientation="vertical",
             padding=(dp(16), dp(16), dp(16), dp(16)),
@@ -120,6 +126,8 @@ class SettingsScreen(BaseManagedScreen):
         return card
 
     def _build_ui_section(self):
+        """UI モード切り替え用のカードを生成。"""
+
         card = MDCard(
             orientation="vertical",
             padding=(dp(16), dp(16), dp(16), dp(16)),
@@ -186,6 +194,8 @@ class SettingsScreen(BaseManagedScreen):
         label.height = getattr(label, "texture_size", (0, 0))[1]
 
     def _set_ui_mode(self, mode: str) -> None:
+        """UI モードを更新し、アプリ状態および DB へ反映する。"""
+
         app = get_app_state()
         app.ui_mode = mode
         db = getattr(app, "db", None)
@@ -208,6 +218,8 @@ class SettingsScreen(BaseManagedScreen):
                 button.line_color = (0.18, 0.36, 0.58, 1)
 
     def _update_backup_label(self) -> None:
+        """最新のバックアップパスを表示用ラベルへ反映。"""
+
         if not self.backup_info_label:
             return
         app = get_app_state()
@@ -223,6 +235,8 @@ class SettingsScreen(BaseManagedScreen):
             self.backup_info_label.text = get_text("settings.no_backup")
 
     def create_backup(self) -> None:
+        """CSV バックアップを作成し、保存場所をユーザーへ知らせる。"""
+
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is None:
@@ -240,6 +254,8 @@ class SettingsScreen(BaseManagedScreen):
         toast(get_text("settings.backup_success"))
 
     def open_db_init_dialog(self):
+        """DB 初期化を実行するか確認するダイアログを表示。"""
+
         if self.confirm_dialog:
             self.confirm_dialog.dismiss()
         self.confirm_dialog = MDDialog(
@@ -264,6 +280,8 @@ class SettingsScreen(BaseManagedScreen):
             self.confirm_dialog = None
 
     def _perform_db_initialization(self, *_):
+        """ユーザーの確認後にデータベース初期化を実行。"""
+
         self._dismiss_dialog()
 
         app = get_app_state()
@@ -295,6 +313,8 @@ class SettingsScreen(BaseManagedScreen):
         toast(get_text("settings.db_init_success"))
 
     def exit_app(self):
+        """アプリケーションを安全に終了させる。"""
+
         self._dismiss_dialog()
         app = MDApp.get_running_app()
         if app:

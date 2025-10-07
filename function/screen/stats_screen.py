@@ -16,6 +16,8 @@ from .base import BaseManagedScreen
 
 
 class StatsScreen(BaseManagedScreen):
+    """対戦結果の簡易統計を表示する画面。"""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.selected_deck: str | None = None
@@ -63,9 +65,12 @@ class StatsScreen(BaseManagedScreen):
         action_anchor.add_widget(clear_button)
 
     def on_pre_enter(self):
+        # 画面表示時に統計情報を最新化。
         self.update_stats()
 
     def open_deck_menu(self):
+        """統計対象のデッキを選ぶドロップダウンを表示。"""
+
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is not None:
@@ -90,6 +95,8 @@ class StatsScreen(BaseManagedScreen):
         self.deck_menu.open()
 
     def set_deck_filter(self, name: str):
+        """選択されたデッキ名でフィルターを更新し、統計を再計算。"""
+
         self.selected_deck = name
         if self.deck_menu:
             self.deck_menu.dismiss()
@@ -97,11 +104,15 @@ class StatsScreen(BaseManagedScreen):
         self.update_stats()
 
     def clear_filter(self):
+        """フィルターを解除して全デッキの統計を表示。"""
+
         self.selected_deck = None
         self.filter_button.text = get_text("stats.filter_button")
         self.update_stats()
 
     def update_stats(self):
+        """現在のフィルター設定に応じた勝敗集計を行う。"""
+
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is None:

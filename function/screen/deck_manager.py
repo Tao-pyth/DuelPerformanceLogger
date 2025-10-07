@@ -9,6 +9,10 @@ from function.cmn_resources import get_text
 class DeckManagerScreen(MDScreen):
     """プレースホルダーのデッキ管理画面."""
 
+    # NOTE: 将来的にデッキ編集機能を実装する予定の画面です。現段階では
+    # サンプル UI と戻るボタンのみが配置されており、画面遷移の仕組みを
+    # 理解する助けとなるよう簡潔にまとめています。
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         layout = MDBoxLayout(orientation="vertical", spacing=24, padding=(24, 24, 24, 24))
@@ -29,5 +33,6 @@ class DeckManagerScreen(MDScreen):
         self.add_widget(layout)
 
     def _back_to_menu(self):
+        # ScreenManager が存在する場合のみメニューへ戻る。
         if self.manager:
             self.manager.current = "menu"

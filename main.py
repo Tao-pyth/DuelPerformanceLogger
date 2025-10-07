@@ -1,5 +1,10 @@
 """Application entry point wiring together the KivyMD screens."""
 
+# NOTE: このファイルはアプリ全体のエントリーポイントです。Kivy/KivyMD の
+# アプリケーション起動処理や、画面（Screen）の初期化・画面遷移設定などを
+# まとめて定義しています。Python / Kivy 初心者向けに、各処理の意図が分かる
+# ように詳細なコメントを付与しています。
+
 from __future__ import annotations
 
 import os
@@ -32,6 +37,9 @@ from function.screen.settings_screen import SettingsScreen
 from function.screen.stats_screen import StatsScreen
 
 if system() == "Windows":
+    # Windows で日本語を含む文字列を正しく表示するため、利用可能なフォントを
+    # 優先順位付きで探します。初めに見つかったフォントを Kivy のデフォルト
+    # として登録します。存在しないファイルはスキップされるため安全です。
     _system_root = Path(os.environ.get("SystemRoot", "C:/Windows"))
     font_candidates = [
         _system_root / "Fonts" / "YuGothicUIRegular.ttf",
@@ -46,14 +54,21 @@ if system() == "Windows":
 
 class DeckAnalyzerApp(MDApp):
     def build(self):
+        """KivyMD アプリ起動時に呼び出される初期化処理。"""
+
+        # テーマカラーなど、見た目に関する初期設定を行う。
         self.theme_cls.primary_palette = "BlueGray"
         self.config = load_config()
         self.default_window_size = Window.size
 
+        # DatabaseManager は SQLite へのアクセスを司るユーティリティ。
+        # 起動時に DB を確実に準備し、ユーザー設定（UI モードなど）を取得する。
         self.db = DatabaseManager()
         self.db.ensure_database()
         self.ui_mode = self.db.get_ui_mode()
 
+        # コンフィグに定義されたスキーマバージョンと、実際の DB バージョンを照合。
+        # 文字列が保存されている可能性もあるので、念のため int 化を試みる。
         expected_version_raw = self.config.get("database", {}).get(
             "expected_version", DatabaseManager.CURRENT_SCHEMA_VERSION
         )
@@ -63,6 +78,7 @@ class DeckAnalyzerApp(MDApp):
             expected_version = DatabaseManager.CURRENT_SCHEMA_VERSION
         current_version = self.db.get_schema_version()
         if current_version != expected_version:
+            # バージョン不一致時はバックアップ作成 → 初期化 → 復元を試みる。
             self.migration_result = self._handle_version_mismatch(
                 current_version, expected_version
             )
@@ -71,6 +87,7 @@ class DeckAnalyzerApp(MDApp):
 
         self.db.set_schema_version(expected_version)
 
+        # アプリ内で使い回す主要データ（デッキ・シーズン・対戦ログ）をまとめて取得。
         self.decks = self.db.fetch_decks()
         self.seasons = self.db.fetch_seasons()
         self.match_records = self.db.fetch_matches()
@@ -78,6 +95,8 @@ class DeckAnalyzerApp(MDApp):
         self.current_match_settings = None
         self.current_match_count = 0
 
+        # アプリがまだ起動していない場面（例えばテストコード）でも画面が参照できる
+        # よう、フォールバック用の状態オブジェクトにも同じ情報をコピーしておく。
         fallback = get_fallback_state()
         fallback.reset()
         fallback.theme_cls.primary_color = self.theme_cls.primary_color
@@ -91,6 +110,7 @@ class DeckAnalyzerApp(MDApp):
         fallback.default_window_size = self.default_window_size
         fallback.migration_result = self.migration_result
 
+        # ここでは ScreenManager に各画面を登録している。`name` が画面遷移のキー。
         screen_manager = MDScreenManager()
         screen_manager.add_widget(MenuScreen(name="menu"))
         screen_manager.add_widget(DeckRegistrationScreen(name="deck_register"))
@@ -109,6 +129,9 @@ class DeckAnalyzerApp(MDApp):
         return screen_manager
 
     def _handle_version_mismatch(self, current_version: int, expected_version: int) -> str:
+        """DB バージョン不一致時の処理フローをまとめたヘルパー。"""
+
+        # まず画面へ表示するメッセージ（ログ）を格納するリストを用意する。
         lines = [
             get_text("settings.db_migration_detected").format(
                 current=current_version, expected=expected_version
@@ -116,16 +139,20 @@ class DeckAnalyzerApp(MDApp):
         ]
 
         try:
+            # 現行 DB のバックアップを作成し、その結果をメッセージへ追加。
             backup_path = self.db.export_backup()
             lines.append(
                 get_text("settings.db_migration_backup").format(path=str(backup_path))
             )
             self.db.record_backup_path(backup_path)
 
+            # スキーマ初期化後、期待されるバージョンを設定する。
             self.db.initialize_database()
             self.db.set_schema_version(expected_version)
 
             try:
+                # バックアップからデータを戻す。失敗したらログに残しつつ、
+                # 画面にも失敗メッセージを表示する。
                 restored = self.db.import_backup(backup_path)
             except DatabaseError as exc:
                 log_db_error(
@@ -139,6 +166,7 @@ class DeckAnalyzerApp(MDApp):
                     + lines
                 )
             else:
+                # 復元成功時は件数を含むメッセージを追加。
                 lines.append(
                     get_text("settings.db_migration_restore_success").format(
                         decks=restored.get("decks", 0),
@@ -149,6 +177,7 @@ class DeckAnalyzerApp(MDApp):
 
             return "\n".join([get_text("settings.db_migration_success")] + lines)
         except Exception as exc:  # pragma: no cover - defensive
+            # 予期せぬ例外が発生した場合も、ユーザーに状況が伝わるよう文字列を返す。
             return "\n".join(
                 [
                     get_text("settings.db_migration_failure").format(error=str(exc)),

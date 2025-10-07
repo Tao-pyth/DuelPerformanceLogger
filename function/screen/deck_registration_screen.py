@@ -24,9 +24,14 @@ from .base import BaseManagedScreen
 class DeckRegistrationScreen(BaseManagedScreen):
     """デッキ登録画面."""
 
+    # NOTE: フォーム入力 → バリデーション → DB 登録 → 一覧更新、という
+    # 一連の流れが確認できる画面です。初心者の方は `register_deck` メソッドを
+    # 追っていくと処理の順序が理解しやすいでしょう。
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        # 入力フォームの主要ウィジェットを作成しておく。
         self.name_field = MDTextField(
             hint_text=get_text("deck_registration.name_hint"),
             helper_text=get_text("common.required_helper"),
@@ -53,12 +58,15 @@ class DeckRegistrationScreen(BaseManagedScreen):
         self.deck_scroll = ScrollView(size_hint=(1, 1))
         self.deck_scroll.add_widget(self.deck_list_container)
 
+        # `_create_scaffold` は共通ヘッダー・コンテンツ・アクション領域をまとめて
+        # 用意してくれるヘルパー。戻るボタンとホームボタンはメニューへ遷移させる。
         self.root_layout, content_anchor, action_anchor = self._create_scaffold(
             get_text("deck_registration.header_title"),
             lambda: self.change_screen("menu"),
             lambda: self.change_screen("menu"),
         )
 
+        # 実際のフォーム部分を配置。`size_hint` で横幅を 95% に抑え、中央寄せにする。
         content_box = MDBoxLayout(
             orientation="vertical",
             spacing=dp(16),
@@ -71,6 +79,7 @@ class DeckRegistrationScreen(BaseManagedScreen):
         content_box.add_widget(self.deck_scroll)
         content_anchor.add_widget(content_box)
 
+        # 登録ボタンはアクション領域に配置。横幅・高さを指定して見た目を揃える。
         register_button = MDRaisedButton(
             text=get_text("common.register"),
             on_press=lambda *_: self.register_deck(),
@@ -81,9 +90,12 @@ class DeckRegistrationScreen(BaseManagedScreen):
         action_anchor.add_widget(register_button)
 
     def register_deck(self):
+        """フォームの内容を検証し、デッキを DB へ登録する。"""
+
         name = self.name_field.text.strip()
         description = self.description_field.text.strip()
 
+        # 必須項目チェック。空の場合はトーストでユーザーへ通知して処理終了。
         if not name:
             toast(get_text("deck_registration.toast_missing_name"))
             return
@@ -98,13 +110,16 @@ class DeckRegistrationScreen(BaseManagedScreen):
         try:
             db.add_deck(name, description)
         except DuplicateEntryError:
+            # 一意制約に引っかかった場合は重複メッセージを表示。
             toast(get_text("deck_registration.toast_duplicate"))
             return
         except DatabaseError as exc:
+            # 予期せぬ DB エラーはログに残し、汎用エラーメッセージを表示。
             log_db_error("Failed to add deck", exc, name=name)
             toast(get_text("common.db_error"))
             return
 
+        # DB への反映が成功したらアプリ状態を更新し、フォームをクリア。
         app.decks = db.fetch_decks()
         toast(get_text("deck_registration.toast_registered"))
         self.name_field.text = ""
@@ -112,15 +127,19 @@ class DeckRegistrationScreen(BaseManagedScreen):
         self.update_deck_list()
 
     def on_pre_enter(self):
+        # 画面表示前に常に一覧を最新化する。
         self.update_deck_list()
 
     def update_deck_list(self):
+        """登録済みデッキ一覧を UI に反映する。"""
+
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is not None:
             app.decks = db.fetch_decks()
         self.deck_list_container.clear_widgets()
 
+        # デッキが 0 件の場合はラベルを表示し、スクロール領域を隠す。
         if not app.decks:
             self.deck_empty_label.height = dp(24)
             self.deck_empty_label.opacity = 1
@@ -136,6 +155,8 @@ class DeckRegistrationScreen(BaseManagedScreen):
                 self.deck_list_container.add_widget(self._create_deck_card(deck))
 
     def _create_deck_card(self, deck: dict[str, str]):
+        """一覧表示用のカードウィジェットを生成する。"""
+
         fallback_description = get_text("common.no_description")
         card = MDCard(
             orientation="horizontal",
@@ -170,6 +191,8 @@ class DeckRegistrationScreen(BaseManagedScreen):
         return card
 
     def delete_deck(self, name: str):
+        """指定されたデッキを削除し、一覧を更新する。"""
+
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is None:
