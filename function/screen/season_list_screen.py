@@ -23,6 +23,8 @@ from .season_registration_screen import parse_schedule_datetime, days_until
 
 
 class SeasonListScreen(BaseManagedScreen):
+    """登録済みシーズンを一覧表示し、削除を行う画面。"""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -55,6 +57,7 @@ class SeasonListScreen(BaseManagedScreen):
             action_anchor_x="right",
         )
 
+        # 中央コンテンツ領域へ空メッセージと一覧スクロールを配置。
         content_box = MDBoxLayout(
             orientation="vertical",
             spacing=dp(16),
@@ -75,9 +78,12 @@ class SeasonListScreen(BaseManagedScreen):
         action_anchor.add_widget(add_button)
 
     def on_pre_enter(self):
+        # 画面に入るたびに最新データへ更新。
         self.update_season_list()
 
     def update_season_list(self):
+        """データベースから最新のシーズン一覧を取得し UI へ反映。"""
+
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is not None:
@@ -102,6 +108,8 @@ class SeasonListScreen(BaseManagedScreen):
                 )
 
     def _create_season_card(self, season: dict[str, object]):
+        """シーズン情報を 1 行のカードとして表示する。"""
+
         card = MDCard(
             orientation="horizontal",
             padding=(dp(16), dp(12), dp(12), dp(12)),
@@ -140,6 +148,8 @@ class SeasonListScreen(BaseManagedScreen):
         return card
 
     def _get_remaining_text(self, season: dict[str, object]) -> str:
+        """シーズン終了までの日数に応じたメッセージを返す。"""
+
         end_date = season.get("end_date") or ""
         end_time = season.get("end_time") or ""
         end_dt = parse_schedule_datetime(end_date, end_time)
@@ -154,6 +164,8 @@ class SeasonListScreen(BaseManagedScreen):
         return get_text("season_registration.schedule_ends_in").format(days=days)
 
     def delete_season(self, name: str):
+        """指定シーズンを削除し、一覧を更新する。"""
+
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is None:

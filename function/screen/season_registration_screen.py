@@ -22,6 +22,8 @@ from .base import BaseManagedScreen
 
 
 def parse_schedule_datetime(date_text: str | None, time_text: str | None) -> Optional[datetime]:
+    """日付文字列と時刻文字列から `datetime` を生成するユーティリティ。"""
+
     if not date_text:
         return None
     try:
@@ -33,6 +35,8 @@ def parse_schedule_datetime(date_text: str | None, time_text: str | None) -> Opt
 
 
 def days_until(target: datetime) -> int:
+    """現在から指定日時までの残日数を整数で返す。"""
+
     delta = target - datetime.now()
     if delta.total_seconds() <= 0:
         return 0
@@ -40,9 +44,12 @@ def days_until(target: datetime) -> int:
 
 
 class SeasonRegistrationScreen(BaseManagedScreen):
+    """シーズン情報を新規登録するフォーム画面。"""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        # 入力フォームの主要フィールドを準備。
         self.name_field = MDTextField(
             hint_text=get_text("season_registration.name_hint"),
             helper_text=get_text("common.required_helper"),
@@ -90,6 +97,7 @@ class SeasonRegistrationScreen(BaseManagedScreen):
             )
         )
 
+        # 開始日時・終了日時の入力エリアを 2 行構成で配置。
         schedule_box = MDBoxLayout(orientation="vertical", spacing=dp(12))
 
         start_row = MDBoxLayout(spacing=dp(12), size_hint_y=None, height=dp(72))
@@ -133,6 +141,8 @@ class SeasonRegistrationScreen(BaseManagedScreen):
         self.reset_form()
 
     def register_season(self):
+        """フォーム内容を検証し、シーズンをデータベースへ保存する。"""
+
         name = self.name_field.text.strip()
         description = self.description_field.text.strip()
 
@@ -174,6 +184,8 @@ class SeasonRegistrationScreen(BaseManagedScreen):
         self.change_screen("season_list")
 
     def reset_form(self):
+        """入力内容を初期化し、次の登録に備える。"""
+
         self.name_field.text = ""
         self.description_field.text = ""
         self.start_date_field.text = ""

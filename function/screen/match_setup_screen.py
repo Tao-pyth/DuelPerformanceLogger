@@ -23,11 +23,13 @@ class MatchSetupScreen(BaseManagedScreen):
     screen_mode = "normal"
 
     def __init__(self, **kwargs):
+        # `screen_mode` は通常画面か配信向け画面かを表す。継承クラスで上書きされる。
         self.screen_mode = getattr(self.__class__, "screen_mode", "normal")
         super().__init__(**kwargs)
         self.selected_deck: str | None = None
         self.deck_menu: MDDropdownMenu | None = None
 
+        # 対戦数入力フィールドとデッキ選択ボタンを準備する。
         self.match_count_field = MDTextField(
             hint_text=get_text("match_setup.count_hint"),
             input_filter="int",
@@ -83,9 +85,11 @@ class MatchSetupScreen(BaseManagedScreen):
         self.start_button.width = dp(220)
         self.normal_action_anchor.add_widget(self.start_button)
 
+        # 配信用レイアウトをあらかじめ生成。必要な時に切り替えて利用する。
         self.broadcast_layout = self._build_broadcast_layout()
 
     def on_pre_enter(self):
+        # 画面再表示時は選択状態をリセットし、表示モードに応じてレイアウトを切替。
         self.selected_deck = None
         self.deck_button.text = get_text("match_setup.deck_button_default")
 
@@ -95,6 +99,8 @@ class MatchSetupScreen(BaseManagedScreen):
         self._sync_window_size(mode)
 
     def open_deck_menu(self):
+        """登録済みデッキをプルダウンとして表示する。"""
+
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is not None:
@@ -119,6 +125,8 @@ class MatchSetupScreen(BaseManagedScreen):
         self.deck_menu.open()
 
     def set_selected_deck(self, name: str):
+        """ユーザーが選択したデッキ名を反映し、次の対戦番号を取得。"""
+
         self.selected_deck = name
         self.deck_button.text = get_text("match_setup.selected_deck_label").format(
             deck_name=name
@@ -132,6 +140,8 @@ class MatchSetupScreen(BaseManagedScreen):
             self.deck_menu.dismiss()
 
     def start_entry(self):
+        """選択したデッキ情報で対戦入力画面へ遷移する。"""
+
         if not self.selected_deck:
             toast(get_text("match_setup.toast_select_deck"))
             return
@@ -153,6 +163,8 @@ class MatchSetupScreen(BaseManagedScreen):
         self.change_screen("match_entry")
 
     def _build_broadcast_layout(self) -> MDBoxLayout:
+        """配信モード用の横長レイアウトを生成。"""
+
         layout = MDBoxLayout(
             orientation="horizontal",
             spacing=dp(12),
@@ -201,12 +213,16 @@ class MatchSetupScreen(BaseManagedScreen):
             parent.remove_widget(widget)
 
     def _apply_mode_layout(self, mode: str) -> None:
+        """画面モードに応じて適切なレイアウトを表示する。"""
+
         if mode == "broadcast":
             self._show_broadcast_layout()
         else:
             self._show_normal_layout()
 
     def _show_broadcast_layout(self) -> None:
+        """配信用レイアウトへ切り替える。"""
+
         if self.normal_root.parent:
             self.remove_widget(self.normal_root)
         if not self.broadcast_layout.parent:
@@ -229,6 +245,8 @@ class MatchSetupScreen(BaseManagedScreen):
         self.broadcast_actions_section.add_widget(self.start_button)
 
     def _show_normal_layout(self) -> None:
+        """通常レイアウトへ戻す。"""
+
         if self.broadcast_layout.parent:
             self.remove_widget(self.broadcast_layout)
         if not self.normal_root.parent:

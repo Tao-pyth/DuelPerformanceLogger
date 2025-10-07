@@ -1,5 +1,3 @@
-"""Main menu screen definition."""
-
 from __future__ import annotations
 
 from kivy.clock import Clock
@@ -23,10 +21,14 @@ from .base import build_header, resolve_screen_name
 class MenuScreen(MDScreen):
     """アプリケーションの初期画面."""
 
+    # NOTE: ユーザーが最初に目にするトップメニュー。その他の画面への導線を
+    # タイル状にまとめ、DB 移行メッセージなどのアラート表示も担当します。
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.migration_dialog: MDDialog | None = None
 
+        # 画面全体は縦にスクロールできるレイアウトで構成。
         root_layout = MDBoxLayout(orientation="vertical", spacing=0)
         root_layout.add_widget(build_header(get_text("menu.title")))
 
@@ -56,6 +58,7 @@ class MenuScreen(MDScreen):
         self.add_widget(root_layout)
 
     def on_pre_enter(self):
+        # DB マイグレーションの結果があればダイアログで案内する。
         app = get_app_state()
         message = getattr(app, "migration_result", "")
         if message:
@@ -63,6 +66,7 @@ class MenuScreen(MDScreen):
             app.migration_result = ""
 
     def _show_migration_message(self, message: str):
+        # 既にダイアログが表示されている場合は一旦閉じてから新しいものを開く。
         if self.migration_dialog:
             self.migration_dialog.dismiss()
         self.migration_dialog = MDDialog(
@@ -83,6 +87,8 @@ class MenuScreen(MDScreen):
             self.migration_dialog = None
 
     def _build_hero_card(self):
+        """メニュー上部の紹介カードを構築する。"""
+
         card = MDCard(
             orientation="vertical",
             padding=(dp(24), dp(24), dp(24), dp(24)),
@@ -128,6 +134,8 @@ class MenuScreen(MDScreen):
         return card
 
     def _build_navigation_grid(self):
+        """各機能への遷移カードをまとめたグリッドを生成する。"""
+
         grid = MDGridLayout(
             cols=1,
             spacing=dp(16),
@@ -179,6 +187,8 @@ class MenuScreen(MDScreen):
         return grid
 
     def _create_menu_option(self, icon, title, description, screen_name):
+        """単一のメニューカードを構築する。"""
+
         card = MDCard(
             orientation="vertical",
             padding=(dp(20), dp(20), dp(20), dp(20)),
@@ -221,6 +231,7 @@ class MenuScreen(MDScreen):
         return card
 
     def change_screen(self, screen_name):
+        # ScreenManager が設定されていれば指定画面へ遷移させる。
         if self.manager:
             resolved = resolve_screen_name(screen_name)
             self.manager.current = resolved

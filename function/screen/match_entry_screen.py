@@ -14,7 +14,7 @@ from kivymd.uix.anchorlayout import MDAnchorLayout
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.button import MDFlatButton, MDRaisedButton, MDRectangleFlatButton
 from kivymd.uix.card import MDCard
-from kivymd.uix.button import MDIconButton  
+from kivymd.uix.button import MDIconButton
 from kivymd.uix.label import MDLabel
 from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.textfield import MDTextField
@@ -27,7 +27,15 @@ from function.cmn_resources import get_text
 from .base import BaseManagedScreen
 
 
+# NOTE: 対戦結果を入力・保存するメイン画面のロジックをまとめています。
+# 先攻/後攻や勝敗をトグルボタンで選び、対戦相手・キーワードを入力して
+# すぐにデータベースへ記録できるように構成されています。配信向けのレイアウト
+# も同じクラスから派生させています。
+
+
 def _normalize_turn_options():
+    """設定ファイルからターン選択肢を読み込み、(ラベル, 値) に正規化。"""
+
     raw = get_text("match_entry.turn_options")
     options: list[tuple[str, bool]] = []
     if isinstance(raw, list):
@@ -47,6 +55,8 @@ def _normalize_turn_options():
 
 
 def _normalize_result_options():
+    """勝敗選択肢を設定から読み込み、(ラベル, 値) リストへ整形。"""
+
     raw = get_text("match_entry.result_options")
     options: list[tuple[str, int]] = []
     if isinstance(raw, list):
@@ -78,6 +88,7 @@ class MatchEntryScreen(BaseManagedScreen):
     screen_mode = "normal"
 
     def __init__(self, **kwargs):
+        # 通常画面か配信画面かを判定しつつ初期化。
         self.screen_mode = getattr(self.__class__, "screen_mode", "normal")
         super().__init__(**kwargs)
         self.turn_choice: Optional[bool] = None
@@ -365,6 +376,8 @@ class MatchEntryScreen(BaseManagedScreen):
         collection: list[MDRectangleFlatButton],
         callback,
     ) -> None:
+        """トグル式のボタン群をまとめて生成し、押下時の処理を紐付ける。"""
+
         app = get_app_state()
         primary_color = getattr(app.theme_cls, "primary_color", (0.2, 0.6, 0.86, 1))
         neutral_line = (0.7, 0.7, 0.7, 1)
@@ -745,6 +758,8 @@ class MatchEntryScreen(BaseManagedScreen):
         self._update_toggle_style(self.result_buttons, choice)
 
     def submit_match(self):
+        """入力内容を検証し、対戦結果をデータベースに記録する。"""
+
         app = get_app_state()
         settings = getattr(app, "current_match_settings", None)
         if not settings:

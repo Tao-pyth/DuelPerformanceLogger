@@ -9,8 +9,14 @@ from function.cmn_resources import get_text
 class CardListScreen(MDScreen):
     """プレースホルダーのカードリスト画面."""
 
+    # NOTE: まだ実装されていない画面のサンプルとして配置されているクラス。
+    # 画面切り替えやレイアウト構築の流れを最小構成で学べるように、簡潔な
+    # UI と戻るボタンのみで構成されています。
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # 画面全体を縦方向レイアウトで構築。`spacing` や `padding` を使うと
+        # 要素間の余白を簡単に調整できます。
         layout = MDBoxLayout(orientation="vertical", spacing=24, padding=(24, 24, 24, 24))
         layout.add_widget(
             MDLabel(
@@ -29,5 +35,6 @@ class CardListScreen(MDScreen):
         self.add_widget(layout)
 
     def _back_to_menu(self):
+        # ScreenManager が設定されていればメニュー画面へ戻る。
         if self.manager:
             self.manager.current = "menu"
