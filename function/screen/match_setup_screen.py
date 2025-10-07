@@ -20,7 +20,10 @@ from .base import BaseManagedScreen
 
 
 class MatchSetupScreen(BaseManagedScreen):
+    screen_mode = "normal"
+
     def __init__(self, **kwargs):
+        self.screen_mode = getattr(self.__class__, "screen_mode", "normal")
         super().__init__(**kwargs)
         self.selected_deck: str | None = None
         self.deck_menu: MDDropdownMenu | None = None
@@ -87,7 +90,7 @@ class MatchSetupScreen(BaseManagedScreen):
         self.deck_button.text = get_text("match_setup.deck_button_default")
 
         app = get_app_state()
-        mode = getattr(app, "ui_mode", "normal")
+        mode = self.screen_mode or getattr(app, "ui_mode", "normal")
         self._apply_mode_layout(mode)
         self._sync_window_size(mode)
 
@@ -249,10 +252,14 @@ class MatchSetupScreen(BaseManagedScreen):
 
     def on_leave(self):
         app = get_app_state()
-        if getattr(app, "ui_mode", "normal") != "broadcast":
+        if self.screen_mode != "broadcast":
             default_size = getattr(app, "default_window_size", None)
             if default_size:
                 Window.size = default_size
 
 
-__all__ = ["MatchSetupScreen"]
+class MatchSetupBroadcastScreen(MatchSetupScreen):
+    screen_mode = "broadcast"
+
+
+__all__ = ["MatchSetupScreen", "MatchSetupBroadcastScreen"]
