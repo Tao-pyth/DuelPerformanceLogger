@@ -10,7 +10,7 @@ from kivymd.toast import toast
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.button import MDRaisedButton
 from kivymd.uix.card import MDCard
-from kivymd.uix.iconbutton import MDIconButton
+from kivymd.uix.button import MDIconButton
 from kivymd.uix.label import MDLabel
 
 from function import DatabaseError
