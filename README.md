@@ -39,3 +39,40 @@
 ## Documentation Links / ドキュメントリンク
 - [Project Wiki Overview / プロジェクト概要](docs/wiki/Overview.md)
 
+## Environment Requirements / 必要環境
+- **Python**: 3.10.x（動作確認済み）
+- **Kivy**: 2.2.1（`requirements.txt` に固定）
+- **KivyMD**: 1.1.1（`requirements.txt` に固定）
+- Windows 10/11 または最新の Ubuntu（GitHub Actions CI で検証）
+
+## Setup / セットアップ手順
+1. Python 3.10 を用意し、仮想環境を作成します。
+   ```bash
+   python3.10 -m venv .venv
+   source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
+   ```
+2. `pip`, `setuptools`, `wheel` を最新化します。
+   ```bash
+   python -m pip install --upgrade pip setuptools wheel
+   ```
+3. ランタイム依存をインストールします。
+   ```bash
+   pip install --extra-index-url https://kivy.org/downloads/simple/ -r requirements.txt
+   ```
+4. 開発用ツールを併せて導入する場合は以下を実行します。
+   ```bash
+   pip install -r requirements-dev.txt
+   pre-commit install
+   ```
+
+> `requirements.in` / `requirements-dev.in` を更新した場合は、 `pip-compile` でロックファイルを再生成してください。
+
+## CI / 自動テスト
+- GitHub Actions にて Ubuntu / Windows のマトリクスで `from kivymd.uix.button import MDIconButton` のサニティテストを実行し、依存バージョン崩れを検知します。
+- Lint は `pre-commit` で `ruff` と KivyMD の誤った import 検出を実施し、CI でも必須化しています。
+
+## Lint & Pre-commit / 静的解析とフック
+- `ruff` による PEP8 / import 整形、`kivymd.uix.iconbutton` の import 禁止ルールを導入しています。
+- `.pre-commit-config.yaml` を利用してローカルコミット前に自動チェックを実行できます。
+- 禁止 import に違反すると pre-commit および CI で失敗します。
+
