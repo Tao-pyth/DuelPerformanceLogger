@@ -10,14 +10,13 @@
     auto_dismiss: False
     title: root.title_text
     text: root.message_text
-    buttons:
-        [
+    buttons: [
         MDFlatButton(
-            text=root.cancel_text,
-            on_release=lambda *_: (root.cancel_callback(), root.dismiss())
+            text: root.cancel_text,
+            on_release: lambda *_: (root.cancel_callback(), root.dismiss())
         ),
         MDRaisedButton(
-            text=root.confirm_text,
-            on_release=lambda *_: (root.confirm_callback(), root.dismiss())
+            text: root.confirm_text,
+            on_release: lambda *_: (root.confirm_callback(), root.dismiss())
         ),
-        ]
+    ]
