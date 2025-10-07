@@ -1,26 +1,26 @@
 # DuelPerformanceLogger Wiki / デュエルパフォーマンスロガー Wiki
 
 ## Project Snapshot / プロジェクトの概況
-- **Purpose / 目的**: KivyMD 製のデスクトップアプリとしてデュエル（対戦）結果を記録・分析し、デッキ改善に役立てる。`main.py` の UI ロジックと `function` パッケージのユーティリティ群で構成される。
+- **Purpose / 目的**: KivyMD 製のデスクトップアプリとしてデュエル（対戦）結果を記録・分析し、デッキ改善に役立てる。`main.py` がアプリ本体を起動し、各画面は `function/screen` 配下のモジュールとして分離されたユーティリティ群から構成される。
 - **Current Focus / 現在の焦点**: デッキ・シーズン・対戦ログの登録と閲覧、データベースバックアップ、UI 表示モード切り替えなどの基盤機能を提供するためのインフラ整備。
-- **Status / 状況**: UI 部品の共通化（ヘッダー生成など）、ローカライズ済み文字列リソース、設定・ログ・DB 周りの管理コードが実装済み。画面遷移や入力フォームのレイアウトは `main.py` に集約されている。
+- **Status / 状況**: UI 部品の共通化（ヘッダー生成など）、ローカライズ済み文字列リソース、設定・ログ・DB 周りの管理コードが実装済み。画面遷移や入力フォームのレイアウトは `function/screen` の各モジュールへ分割され、`main.py` は画面登録とアプリ初期化に集中。
 
 ## Application Architecture / アプリケーションアーキテクチャ
 ### UI & State Management / UI と状態管理
-- `main.py` は KivyMD アプリ本体であり、画面管理 (`MDScreenManager`) や各種レイアウト、トースト表示、ダイアログ制御を担う。
-- `_FallbackAppState` により、`MDApp` が起動していない状態でも設定やデータベース接続などの属性へアクセス可能。テストやスクリプト実行時の安全装置として機能する。
-- `build_header` のような UI ヘルパーで、画面上部の共通ヘッダー（タイトル、戻る・トップボタン）を再利用可能にしている。
+- `main.py` は KivyMD アプリ本体であり、画面管理 (`MDScreenManager`) や初期化処理を担う。具体的な UI ロジックは `function/screen` 配下の個別モジュールに定義され、責務が分離された。
+- `function.cmn_app_state.get_fallback_state()` が返す `_FallbackAppState` により、`MDApp` が起動していない状態でも設定やデータベース接続などの属性へアクセス可能。テストやスクリプト実行時の安全装置として機能する。
+- `function.screen.base.build_header` のような UI ヘルパーで、画面上部の共通ヘッダー（タイトル、戻る・トップボタン）を再利用可能にしている。
 
 ### Localization Resources / ローカライズリソース
-- `function.resources.get_text` は `resource/theme/json/strings.json` の辞書データからドット区切りキーで文言を取得。`lru_cache` により I/O を最小化。
+- `function.cmn_resources.get_text` は `resource/theme/json/strings.json` の辞書データからドット区切りキーで文言を取得。`lru_cache` により I/O を最小化。
 - 文字列リソースは日本語中心で、UI のメニュー、トースト、ダイアログ文言を網羅する。
 
 ### Configuration Management / 設定管理
-- `function.config` が設定 (`resource/theme/config.conf`) の読み取りを担当。`configparser` ベースで既定値 (`DEFAULT_CONFIG`) とマージし、ファイルは読み取り専用運用とする。
+- `function.cmn_config` が設定 (`resource/theme/config.conf`) の読み取りを担当。`configparser` ベースで既定値 (`DEFAULT_CONFIG`) とマージし、ファイルは読み取り専用運用とする。
 - UI モードは DB メタデータ (`db_metadata`) で管理し、設定ファイルにはデータベースの期待スキーマバージョンなどの静的値のみを保持する。
 
 ### Database Layer / データベース層
-- `DatabaseManager` (`function.database`) は SQLite3 を操作する高水準ラッパー。自動でフォルダ作成、外部キー ON、`sqlite3.Row` を dict に変換して返却。
+- `DatabaseManager` (`function.cmn_database`) は SQLite3 を操作する高水準ラッパー。自動でフォルダ作成、外部キー ON、`sqlite3.Row` を dict に変換して返却。
 - `initialize_database` は冪等なテーブル再作成を提供し、`ensure_database` でメタデータ確認と初期化を自動化。
 - テーブル構成（概要）:
   - `decks`: デッキ名・説明の管理。
@@ -30,7 +30,7 @@
 - 例外設計として `DatabaseError`, `DuplicateEntryError` を用意し、UI 層から制御しやすいよう区別している。
 
 ### Logging / ログ管理
-- `function.logger.log_error` はタイムスタンプ付きログを `resource/log` 配下に日別ファイルとして保存。例外スタックやコンテキスト情報を追記してトラブルシューティングを容易にする。
+- `function.cmn_logger.log_error` はタイムスタンプ付きログを `resource/log` 配下に日別ファイルとして保存。例外スタックやコンテキスト情報を追記してトラブルシューティングを容易にする。
 
 ## Data Flow Overview / データフロー概要
 1. ユーザーが UI でデッキやシーズンを登録すると、`DatabaseManager` を通じて SQLite に保存される。

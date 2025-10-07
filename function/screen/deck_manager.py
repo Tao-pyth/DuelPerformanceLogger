@@ -3,18 +3,18 @@ from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.label import MDLabel
 from kivymd.uix.button import MDRaisedButton
 
-from function.resources import get_text
+from function.cmn_resources import get_text
 
 
-class CardListScreen(MDScreen):
-    """プレースホルダーのカードリスト画面."""
+class DeckManagerScreen(MDScreen):
+    """プレースホルダーのデッキ管理画面."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         layout = MDBoxLayout(orientation="vertical", spacing=24, padding=(24, 24, 24, 24))
         layout.add_widget(
             MDLabel(
-                text=get_text("placeholders.card_list"),
+                text=get_text("placeholders.deck_manager"),
                 halign="center",
                 font_style="H5",
             )

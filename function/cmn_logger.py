@@ -1,4 +1,4 @@
-"""Application-level logging helpers for persisting error details."""
+"""Common logging utilities used across the application."""
 
 from __future__ import annotations
 
@@ -33,3 +33,12 @@ def log_error(message: str, exc: BaseException | None = None, **context: Any) ->
         stream.write("\n")
 
     return log_path
+
+
+def log_db_error(context: str, exc: Exception | None = None, **info: Any) -> Path:
+    """Persist database error details to the log folder."""
+
+    return log_error(context, exc, **info)
+
+
+__all__ = ["log_error", "log_db_error"]

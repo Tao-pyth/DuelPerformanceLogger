@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
-from .logger import log_error
+from .cmn_logger import log_error
 
 
 class DatabaseError(RuntimeError):
