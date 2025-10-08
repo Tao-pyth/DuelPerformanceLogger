@@ -77,10 +77,17 @@ def _register_kivymd_widgets() -> None:
     from kivymd.uix.card import MDCard
     from kivymd.uix.dialog import MDDialog
     from kivymd.uix.label import MDIcon, MDLabel
-    from kivymd.uix.list import MDSeparator
     from kivymd.uix.scrollview import MDScrollView
     from kivymd.uix.textfield import MDTextField
     from kivymd.uix.toolbar import MDToolbar
+
+    try:  # KivyMD <= 1.2.0
+        from kivymd.uix.list import MDSeparator
+    except ImportError:  # pragma: no cover - depends on external KivyMD version
+        try:  # KivyMD 1.2.0+ (MDSeparator moved)
+            from kivymd.uix.card import MDSeparator
+        except ImportError:  # pragma: no cover - final fallback for newer APIs
+            from kivymd.uix.divider import MDDivider as MDSeparator
 
     _ = (
         MDToolbar,
