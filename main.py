@@ -55,16 +55,66 @@ if system() == "Windows":
 
 
 _GUI_ROOT = Path(__file__).resolve().parent / "resource" / "theme" / "gui"
+_KIVYMD_WIDGETS_REGISTERED = False
+_KV_FILES_LOADED = False
+
+
+def _register_kivymd_widgets() -> None:
+    """Ensure widgets referenced in KV files are registered with the Factory."""
+
+    global _KIVYMD_WIDGETS_REGISTERED
+    if _KIVYMD_WIDGETS_REGISTERED:
+        return
+
+    from kivymd.uix.boxlayout import MDBoxLayout
+    from kivymd.uix.button import (
+        MDFillRoundFlatIconButton,
+        MDFlatButton,
+        MDIconButton,
+        MDRectangleFlatIconButton,
+        MDRaisedButton,
+    )
+    from kivymd.uix.card import MDCard
+    from kivymd.uix.dialog import MDDialog
+    from kivymd.uix.label import MDIcon, MDLabel
+    from kivymd.uix.list import MDSeparator
+    from kivymd.uix.scrollview import MDScrollView
+    from kivymd.uix.textfield import MDTextField
+    from kivymd.uix.toolbar import MDToolbar
+
+    _ = (
+        MDToolbar,
+        MDIconButton,
+        MDRaisedButton,
+        MDFlatButton,
+        MDFillRoundFlatIconButton,
+        MDRectangleFlatIconButton,
+        MDBoxLayout,
+        MDScrollView,
+        MDLabel,
+        MDIcon,
+        MDTextField,
+        MDCard,
+        MDDialog,
+        MDSeparator,
+    )
+
+    _KIVYMD_WIDGETS_REGISTERED = True
 
 
 def _load_gui_definitions() -> None:
     """Load kv definitions from the centralized GUI directory."""
+
+    global _KV_FILES_LOADED
+    if _KV_FILES_LOADED:
+        return
 
     resource_add_path(str(_GUI_ROOT))
 
     app_kv = _GUI_ROOT / "app.kv"
     if app_kv.exists():
         Builder.load_file(str(app_kv))
+        _KV_FILES_LOADED = True
         return
 
     for subdirectory in ("styles", "components", "screens"):
@@ -74,8 +124,7 @@ def _load_gui_definitions() -> None:
         for kv_path in sorted(directory_path.glob("*.kv")):
             Builder.load_file(str(kv_path))
 
-
-_load_gui_definitions()
+    _KV_FILES_LOADED = True
 
 
 class DeckAnalyzerApp(MDApp):
@@ -98,6 +147,9 @@ class DeckAnalyzerApp(MDApp):
                 画面を集約したマネージャを返し、Kivy がルートウィジェットとして
                 使用します。
         """
+
+        _register_kivymd_widgets()
+        _load_gui_definitions()
 
         # テーマカラーなど、見た目に関する初期設定を行う。
         self.theme_cls.primary_palette = "BlueGray"
