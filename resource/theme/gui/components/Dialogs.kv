@@ -3,9 +3,9 @@
 <ConfirmDialog@MDDialog>:
     title_text: ""
     message_text: ""
-    confirm_text: ""
+    ok_text: ""
     cancel_text: ""
-    confirm_callback: lambda *_: None
+    ok_callback: lambda *_: None
     cancel_callback: lambda *_: None
     auto_dismiss: False
     title: root.title_text
@@ -16,7 +16,7 @@
             on_release: lambda *_: (root.cancel_callback(), root.dismiss())
         ),
         MDRaisedButton(
-            text: root.confirm_text,
-            on_release: lambda *_: (root.confirm_callback(), root.dismiss())
+            text: root.ok_text,
+            on_release: lambda *_: (root.ok_callback(), root.dismiss())
         ),
     ]
