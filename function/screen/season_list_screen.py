@@ -7,12 +7,13 @@ from datetime import datetime
 from functools import partial
 
 from kivy.properties import BooleanProperty, ListProperty
-from kivymd.toast import toast
 
 from function import DatabaseError
 from function.cmn_app_state import get_app_state
 from function.cmn_logger import log_db_error
 from function.cmn_resources import get_text
+# 共通通知ヘルパーでトースト呼び出しを集約。
+from function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 from .season_registration_screen import parse_schedule_datetime, days_until
@@ -70,18 +71,18 @@ class SeasonListScreen(BaseManagedScreen):
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is None:
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         try:
             db.delete_season(name)
         except DatabaseError as exc:
             log_db_error("Failed to delete season", exc, name=name)
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         app.seasons = db.fetch_seasons()
-        toast(get_text("season_registration.toast_deleted"))
+        notify(get_text("season_registration.toast_deleted"))
         self.update_season_list()
 
 

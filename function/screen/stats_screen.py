@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from kivy.properties import StringProperty
-from kivymd.toast import toast
 from kivymd.uix.menu import MDDropdownMenu
 
 from function.cmn_app_state import get_app_state
 from function.cmn_resources import get_text
+# 共通通知ヘルパーでメッセージ表示を統一。
+from function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 
@@ -40,7 +41,7 @@ class StatsScreen(BaseManagedScreen):
         if db is not None:
             app.decks = db.fetch_decks()
         if not app.decks:
-            toast(get_text("stats.toast_no_decks"))
+            notify(get_text("stats.toast_no_decks"))
             return
 
         menu_items = [

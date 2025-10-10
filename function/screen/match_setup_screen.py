@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from kivy.core.window import Window
 from kivy.properties import BooleanProperty, StringProperty
-from kivymd.toast import toast
 from kivymd.uix.menu import MDDropdownMenu
 
 from function.cmn_app_state import get_app_state
 from function.cmn_resources import get_text
+# 共通通知ヘルパーでメッセージ表示を一本化。
+from function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 
@@ -53,7 +54,7 @@ class MatchSetupScreen(BaseManagedScreen):
         if db is not None:
             app.decks = db.fetch_decks()
         if not app.decks:
-            toast(get_text("match_setup.toast_no_decks"))
+            notify(get_text("match_setup.toast_no_decks"))
             return
 
         menu_items = [
@@ -93,7 +94,7 @@ class MatchSetupScreen(BaseManagedScreen):
         """選択したデッキ情報で対戦入力画面へ遷移する。"""
 
         if not self.selected_deck:
-            toast(get_text("match_setup.toast_select_deck"))
+            notify(get_text("match_setup.toast_select_deck"))
             return
 
         try:
@@ -101,7 +102,7 @@ class MatchSetupScreen(BaseManagedScreen):
             text = field.text if field is not None else "0"
             initial_count = int(text or 0)
         except ValueError:
-            toast(get_text("match_setup.toast_invalid_count"))
+            notify(get_text("match_setup.toast_invalid_count"))
             return
 
         app = get_app_state()
@@ -111,7 +112,7 @@ class MatchSetupScreen(BaseManagedScreen):
         }
         app.current_match_count = initial_count
 
-        toast(get_text("match_setup.toast_start"))
+        notify(get_text("match_setup.toast_start"))
         self.change_screen("match_entry")
 
     def _get_match_count_field(self):
