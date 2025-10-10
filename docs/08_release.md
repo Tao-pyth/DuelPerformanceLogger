@@ -1,26 +1,70 @@
-# 08. Release Management / リリース管理
+# 08. リリース管理ガイド (Release Management)
 
-## 1. Versioning
-- バージョンスキームは `DPL.<MAJOR>.<MINOR>.<PATCH>`。
-- 破壊的変更: MAJOR++ / MINOR, PATCH を 0 にリセット。
-- 後方互換追加: MINOR++ / PATCH を 0 にリセット。
-- バグ修正: PATCH++。
+PyInstaller one-folder 構成と Updater.exe を前提にした Duel Performance Logger のリリース手順を定義します。
 
-## 2. Release Checklist
-1. `app/function/core/version.py` の `__version__` を更新。
-2. `docs/wiki/Overview.md` の「Project Snapshot」を最新化。
-3. マイグレーションを実行し、`logs/app.log` に結果を記録。
-4. `pytest`, `ruff`, `mypy` を実行。
-5. `pyinstaller -y scripts/pyinstaller/duel_logger.spec`。
-6. `tools/release/verify_update.py` で Updater の replace-and-relaunch を検証。
-7. GitHub Release を作成し、ZIP と SHA256 を添付。
+## バージョンポリシー
 
-## 3. Communication
-- Release Notes は日本語/英語併記で記述。テンプレートは `docs/resource/release_note_template.md`。
-- 既知の問題 (Known Issues) は release note の末尾に掲載し、回避策を記載。
-- 重大バグ発生時はホットフィックス版を 24 時間以内に配布。
+- 形式: `DPL.<MAJOR>.<MINOR>.<PATCH>`。
+- MAJOR: 破壊的変更 (DB schema 不整合、Updater CLI 互換性切り捨て)。
+- MINOR: 後方互換な新機能追加 (DSL キー追加、UI 機能強化)。
+- PATCH: バグ修正および内部改善のみ。
+- バージョン定義は `app/function/core/version.py::__version__`。
 
-## 4. Post Release Tasks
-- Issue Tracker へ「リリース済み」ラベルを追加し、フィードバックを収集。
-- 収集したログやクラッシュダンプは 14 日で破棄。
-- 次期開発用の `work` ブランチを `main` から再作成し、マージキューをクリア。
+## リリース分岐
+
+1. `main` ブランチから release ブランチ `release/DPL.x.y.z` を作成。
+2. 変更を凍結し、テスト完了後にタグ付け。
+3. リリース後は `main` にマージバックし、バージョンを次開発版に進める。
+
+## パッケージング手順
+
+1. `python scripts/tools/build.py --mode onefolder --version DPL.x.y.z`。
+2. 生成物: `dist/DuelPerformanceLogger/` (Main.exe, Updater.exe, assets)。
+3. `scripts/tools/sign.ps1 dist/DuelPerformanceLogger/*.exe` で署名。
+4. `scripts/tools/package.ps1 dist/DuelPerformanceLogger DuelPerformanceLogger-DPL.x.y.z-win64.zip` でアーカイブ。
+
+## アップデート配信
+
+- ZIP を GitHub Release にアップロード。
+- `checksums.txt` に SHA256 を追記。
+- 更新サーバーの manifest (`updates/manifest.json`) にバージョンを登録。
+- Manifest 例:
+
+```json
+{
+  "channel": "stable",
+  "latest": "DPL.1.4.0",
+  "packages": {
+    "DPL.1.4.0": {
+      "url": "https://downloads.example.com/DPL.1.4.0.zip",
+      "sha256": "..."
+    }
+  }
+}
+```
+
+## ドキュメント更新
+
+- `docs/` 配下の該当ガイドを更新。
+- `CHANGELOG.md` に差分を追記。
+- バージョンタグと同名の Release Notes を作成し、以下を記載:
+  - ハイライト
+  - 既知の問題 (`docs/known_issues.md` 参照)
+  - SHA256
+  - アップデート手順
+
+## CI パイプライン
+
+- タグプッシュで `windows-build.yml` が実行。
+- ステップ: lint → pytest → build → sign → upload。
+- 失敗時は Slack `#dpl-release` に通知。
+
+## Checklist
+
+- [ ] `__version__` を更新。
+- [ ] マイグレーションテストが成功。
+- [ ] PyInstaller one-folder ビルドを検証。
+- [ ] Updater manifest を更新。
+- [ ] Release Notes と `known_issues` を公開。
+
+**Last Updated:** 2025-10-12
