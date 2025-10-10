@@ -8,12 +8,12 @@ from functools import partial
 
 from kivy.properties import BooleanProperty, ListProperty
 
-from function import DatabaseError
-from function.cmn_app_state import get_app_state
-from function.cmn_logger import log_db_error
-from function.cmn_resources import get_text
+from app.function import DatabaseError
+from app.function.cmn_app_state import get_app_state
+from app.function.cmn_logger import log_db_error
+from app.function.cmn_resources import get_text
 # 共通通知ヘルパーでトースト呼び出しを集約。
-from function.core.ui_notify import notify
+from app.function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 from .season_registration_screen import parse_schedule_datetime, days_until

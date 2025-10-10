@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
+
+from app.function.core import paths
 
 
 # NOTE: Kivy の UI テキストは JSON ファイルにまとめて保存しています。
@@ -13,8 +14,8 @@ from typing import Any
 # 画面側がシンプルな `get_text("menu.title")` といった呼び出しで文字列を取得できる
 # ようにしています。
 
-# 文字列リソースが格納されているディレクトリを事前に解決しておく。
-_RESOURCE_DIR = Path(__file__).resolve().parent.parent / "resource" / "theme" / "json"
+# 文字列リソースが格納されているファイルパスを centralized path helper から取得。
+_STRINGS_PATH = paths.strings_path()
 
 
 @lru_cache(maxsize=1)
@@ -23,8 +24,7 @@ def _load_strings() -> dict[str, Any]:
 
     # `lru_cache` を使うことで 1 度読み込んだ JSON をメモリに保持し、
     # 毎回ディスクへアクセスするコストを削減している。
-    strings_path = _RESOURCE_DIR / "strings.json"
-    with strings_path.open(encoding="utf-8") as stream:
+    with _STRINGS_PATH.open(encoding="utf-8") as stream:
         return json.load(stream)
 
 

@@ -6,12 +6,12 @@ from functools import partial
 
 from kivy.properties import BooleanProperty, ListProperty
 
-from function import DatabaseError, DuplicateEntryError
-from function.cmn_app_state import get_app_state
-from function.cmn_logger import log_db_error
-from function.cmn_resources import get_text
+from app.function import DatabaseError, DuplicateEntryError
+from app.function.cmn_app_state import get_app_state
+from app.function.cmn_logger import log_db_error
+from app.function.cmn_resources import get_text
 # 共通通知処理でプラットフォーム依存コードを排除。
-from function.core.ui_notify import notify
+from app.function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 

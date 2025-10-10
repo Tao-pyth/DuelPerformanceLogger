@@ -13,8 +13,8 @@ from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.button import MDRectangleFlatIconButton
 from kivymd.uix.label import MDLabel
 
-from function.cmn_app_state import get_app_state
-from function.cmn_resources import get_text
+from app.function.cmn_app_state import get_app_state
+from app.function.cmn_resources import get_text
 
 
 # NOTE: 複数画面で共通となる UI 部品・挙動をまとめた基底モジュールです。

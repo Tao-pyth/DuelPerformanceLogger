@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
+from app.function.core import paths
+
 from .cmn_logger import log_error
 
 
@@ -45,7 +47,8 @@ class DatabaseManager:
     Parameters
     ----------
     db_path: Optional[Path | str]
-        データベースファイルのパス。未指定時は ``resource/db/duel_performance.sqlite3`` を使用。
+        データベースファイルのパス。未指定時は ``%APPDATA%/DuelPerformanceLogger/db/``
+        配下にある ``duel_performance.sqlite3`` を使用。
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
@@ -57,8 +60,8 @@ class DatabaseManager:
     }
 
     def __init__(self, db_path: Optional[Path | str] = None) -> None:
-        # プロジェクトルートからの相対で DB 既定置き場を解決
-        base_dir = Path(__file__).resolve().parent.parent / "resource" / "db"
+        # プロジェクト標準のユーザーデータディレクトリ配下へ DB を配置する。
+        base_dir = paths.database_dir()
         if db_path is None:
             db_path = base_dir / "duel_performance.sqlite3"
         else:
@@ -275,13 +278,7 @@ class DatabaseManager:
 
         if destination is None:
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            destination = (
-                Path(__file__).resolve().parent.parent
-                / "resource"
-                / "theme"
-                / "backups"
-                / timestamp
-            )
+            destination = paths.backup_dir() / timestamp
         else:
             destination = Path(destination)
 

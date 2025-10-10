@@ -6,10 +6,10 @@ from kivy.core.window import Window
 from kivy.properties import StringProperty
 from kivymd.app import MDApp
 
-from function.cmn_app_state import get_app_state, get_fallback_state
-from function.cmn_resources import get_text
+from app.function.cmn_app_state import get_app_state, get_fallback_state
+from app.function.cmn_resources import get_text
 # 共通通知ヘルパーで通知手段を統合。
-from function.core.ui_notify import notify
+from app.function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 

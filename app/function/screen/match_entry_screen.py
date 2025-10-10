@@ -12,12 +12,12 @@ from kivy.properties import (
 )
 from kivymd.uix.menu import MDDropdownMenu
 
-from function import DatabaseError
-from function.cmn_app_state import get_app_state
-from function.cmn_logger import log_db_error
-from function.cmn_resources import get_text
+from app.function import DatabaseError
+from app.function.cmn_app_state import get_app_state
+from app.function.cmn_logger import log_db_error
+from app.function.cmn_resources import get_text
 # 共通通知ヘルパーで UI 通知を一元化。
-from function.core.ui_notify import notify
+from app.function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 
