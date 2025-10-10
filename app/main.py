@@ -18,25 +18,26 @@ from kivy.resources import resource_add_path
 from kivymd.app import MDApp
 from kivymd.uix.screenmanager import MDScreenManager
 
-from function import DatabaseManager, DatabaseError
-from function.cmn_app_state import get_fallback_state
-from function.cmn_config import load_config
-from function.cmn_logger import log_db_error
-from function.cmn_resources import get_text
-from function.screen.deck_registration_screen import DeckRegistrationScreen
-from function.screen.match_entry_screen import (
+from app.function import DatabaseManager, DatabaseError
+from app.function.cmn_app_state import get_fallback_state
+from app.function.cmn_config import load_config
+from app.function.cmn_logger import log_db_error
+from app.function.cmn_resources import get_text
+from app.function.core import paths
+from app.function.screen.deck_registration_screen import DeckRegistrationScreen
+from app.function.screen.match_entry_screen import (
     MatchEntryBroadcastScreen,
     MatchEntryScreen,
 )
-from function.screen.match_setup_screen import (
+from app.function.screen.match_setup_screen import (
     MatchSetupBroadcastScreen,
     MatchSetupScreen,
 )
-from function.screen.menu_screen import MenuScreen
-from function.screen.season_list_screen import SeasonListScreen
-from function.screen.season_registration_screen import SeasonRegistrationScreen
-from function.screen.settings_screen import SettingsScreen
-from function.screen.stats_screen import StatsScreen
+from app.function.screen.menu_screen import MenuScreen
+from app.function.screen.season_list_screen import SeasonListScreen
+from app.function.screen.season_registration_screen import SeasonRegistrationScreen
+from app.function.screen.settings_screen import SettingsScreen
+from app.function.screen.stats_screen import StatsScreen
 
 if system() == "Windows":
     # Windows で日本語を含む文字列を正しく表示するため、利用可能なフォントを
@@ -52,9 +53,7 @@ if system() == "Windows":
         if font_path.exists():
             LabelBase.register(DEFAULT_FONT, str(font_path))
             break
-
-
-_GUI_ROOT = Path(__file__).resolve().parent / "resource" / "theme" / "gui"
+_GUI_ROOT = paths.gui_root()
 _KIVYMD_WIDGETS_REGISTERED = False
 _KV_FILES_LOADED = False
 

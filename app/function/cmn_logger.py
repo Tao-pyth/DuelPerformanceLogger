@@ -7,12 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from app.function.core import paths
+
 # NOTE: 例外情報や追加コンテキストをテキストファイルとして出力する小さな
 # ロガーです。標準ライブラリのみで動作し、アプリ固有のログ出力仕様に合わせて
 # シンプルに実装しています。
 
-_LOG_DIR = Path(__file__).resolve().parent.parent / "resource" / "log"
-_LOG_DIR.mkdir(parents=True, exist_ok=True)
+_LOG_DIR = paths.log_dir()
 
 
 def log_error(message: str, exc: BaseException | None = None, **context: Any) -> Path:

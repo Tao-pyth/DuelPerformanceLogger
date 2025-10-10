@@ -5,7 +5,7 @@ from functools import partial
 from kivy.properties import BooleanProperty, ListProperty, StringProperty
 from kivymd.uix.screen import MDScreen
 
-from function.cmn_app_state import get_app_state
+from app.function.cmn_app_state import get_app_state
 from .base import resolve_screen_name
 
 

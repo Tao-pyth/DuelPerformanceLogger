@@ -1,22 +1,25 @@
 """アプリケーション設定ファイルを扱うユーティリティ群。
 
-``resource/theme/config.conf`` に保存された設定を読み込み、辞書形式で返却する
-ヘルパーをまとめています。設定が存在しない場合は、既定値を含む辞書を返します。
+ユーザーデータディレクトリ（例: ``%APPDATA%/DuelPerformanceLogger``）に保存された
+設定を読み込み、辞書形式で返却するヘルパーをまとめています。設定が存在しない
+場合は、パッケージ同梱の既定設定とマージした辞書を返します。
 """
 
-# NOTE: 設定ファイル（`resource/theme/config.conf`）を読み込み、辞書形式で
-# 返すためのヘルパーをまとめています。設定が存在しない場合でも安全に
-# 既定値で動作するよう、読み込み → マージ処理を行います。
+# NOTE: 設定ファイルをユーザーデータディレクトリから読み込み、存在しない場合は
+# パッケージ同梱の既定設定をフォールバックとして利用します。設定が存在しなくて
+# も安全に既定値で動作するよう、読み込み → マージ処理を行います。
 
 from __future__ import annotations
 
 import configparser
-from pathlib import Path
 from typing import Any, MutableMapping
 
+from app.function.core import paths
 
-# 設定ファイルの実体はプロジェクト内の `resource/theme/config.conf` にあります。
-_CONFIG_PATH = Path(__file__).resolve().parent.parent / "resource" / "theme" / "config.conf"
+
+# 設定ファイルはユーザーデータディレクトリ配下に配置し、パッケージ同梱の既定値も参照可能にする。
+_CONFIG_PATH = paths.config_path()
+_DEFAULT_CONFIG_PATH = paths.default_config_path()
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -38,8 +41,11 @@ def load_config() -> dict[str, Any]:
 
     # `ConfigParser` で INI 形式の設定を読み込む。ファイルがなければ空のまま。
     parser = configparser.ConfigParser()
+    paths.config_dir()  # ensure directory exists for potential writes
     if _CONFIG_PATH.exists():
         parser.read(_CONFIG_PATH, encoding="utf-8")
+    elif _DEFAULT_CONFIG_PATH.exists():
+        parser.read(_DEFAULT_CONFIG_PATH, encoding="utf-8")
 
     # 読み込んだ結果を通常の辞書へ変換し、`DEFAULT_CONFIG` を土台として上書き。
     config = _configparser_to_dict(parser)

@@ -5,10 +5,10 @@ from __future__ import annotations
 from kivy.properties import StringProperty
 from kivymd.uix.menu import MDDropdownMenu
 
-from function.cmn_app_state import get_app_state
-from function.cmn_resources import get_text
+from app.function.cmn_app_state import get_app_state
+from app.function.cmn_resources import get_text
 # 共通通知ヘルパーでメッセージ表示を統一。
-from function.core.ui_notify import notify
+from app.function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 
