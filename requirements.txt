@@ -7,7 +7,7 @@
 # To update, modify requirements.in and re-run the command above.
 #
 # Core runtime dependencies
-kivy==2.2.1
+kivy==2.3.1
     # via -r requirements.in
-kivymd==1.1.1
+kivymd==1.2.0
     # via -r requirements.in
