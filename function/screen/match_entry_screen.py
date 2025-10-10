@@ -10,13 +10,14 @@ from kivy.properties import (
     ObjectProperty,
     StringProperty,
 )
-from kivymd.toast import toast
 from kivymd.uix.menu import MDDropdownMenu
 
 from function import DatabaseError
 from function.cmn_app_state import get_app_state
 from function.cmn_logger import log_db_error
 from function.cmn_resources import get_text
+# 共通通知ヘルパーで UI 通知を一元化。
+from function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 
@@ -289,12 +290,12 @@ class MatchEntryScreen(BaseManagedScreen):
         app = get_app_state()
         settings = getattr(app, "current_match_settings", None)
         if not settings:
-            toast(get_text("match_entry.toast_missing_setup"))
+            notify(get_text("match_entry.toast_missing_setup"))
             return
 
         db = getattr(app, "db", None)
         if db is None:
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         opponent = self.ids.get("opponent")
@@ -322,7 +323,7 @@ class MatchEntryScreen(BaseManagedScreen):
             db.record_match(record)
         except DatabaseError as exc:
             log_db_error("Failed to record match", exc, record=record)
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             error_occurred = True
         finally:
             self.busy = False
@@ -341,7 +342,7 @@ class MatchEntryScreen(BaseManagedScreen):
 
         self.reset_inputs(focus_opponent=True)
         self._load_last_record()
-        toast(get_text("match_entry.toast_recorded"))
+        notify(get_text("match_entry.toast_recorded"))
 
     def copy_last_record(self):
         """Copy last record values into the input fields."""
@@ -355,7 +356,7 @@ class MatchEntryScreen(BaseManagedScreen):
             opponent.text = self.last_record_data.get("opponent_deck", "")
         if keywords is not None:
             keywords.text = ", ".join(self.last_record_data.get("keywords") or [])
-        toast(get_text("match_entry.toast_copied_previous"))
+        notify(get_text("match_entry.toast_copied_previous"))
         self._recalc()
 
     def _load_last_record(self):

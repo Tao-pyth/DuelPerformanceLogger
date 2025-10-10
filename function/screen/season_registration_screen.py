@@ -7,12 +7,13 @@ from datetime import datetime
 from typing import Optional
 
 from kivy.properties import StringProperty
-from kivymd.toast import toast
 
 from function import DatabaseError, DuplicateEntryError
 from function.cmn_app_state import get_app_state
 from function.cmn_logger import log_db_error
 from function.cmn_resources import get_text
+# 共通通知処理でプラットフォーム差異に対応。
+from function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 
@@ -60,13 +61,13 @@ class SeasonRegistrationScreen(BaseManagedScreen):
         description = self.ids.description_field.text.strip()
 
         if not name:
-            toast(get_text("season_registration.toast_missing_name"))
+            notify(get_text("season_registration.toast_missing_name"))
             return
 
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is None:
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         start_date = self.ids.start_date_field.text.strip() or None
@@ -84,15 +85,15 @@ class SeasonRegistrationScreen(BaseManagedScreen):
                 end_time=end_time,
             )
         except DuplicateEntryError:
-            toast(get_text("season_registration.toast_duplicate"))
+            notify(get_text("season_registration.toast_duplicate"))
             return
         except DatabaseError as exc:
             log_db_error("Failed to add season", exc, name=name)
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         app.seasons = db.fetch_seasons()
-        toast(get_text("season_registration.toast_registered"))
+        notify(get_text("season_registration.toast_registered"))
         self.reset_form()
         self.change_screen("season_list")
 

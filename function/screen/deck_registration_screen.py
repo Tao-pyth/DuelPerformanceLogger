@@ -5,12 +5,13 @@ from __future__ import annotations
 from functools import partial
 
 from kivy.properties import BooleanProperty, ListProperty
-from kivymd.toast import toast
 
 from function import DatabaseError, DuplicateEntryError
 from function.cmn_app_state import get_app_state
 from function.cmn_logger import log_db_error
 from function.cmn_resources import get_text
+# 共通通知処理でプラットフォーム依存コードを排除。
+from function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 
@@ -32,31 +33,32 @@ class DeckRegistrationScreen(BaseManagedScreen):
 
         # 必須項目チェック。空の場合はトーストでユーザーへ通知して処理終了。
         if not name:
-            toast(get_text("deck_registration.toast_missing_name"))
+            # 共通通知ヘルパーでプラットフォーム差異を吸収。
+            notify(get_text("deck_registration.toast_missing_name"))
             return
 
         app = get_app_state()
         db = getattr(app, "db", None)
 
         if db is None:
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         try:
             db.add_deck(name, description)
         except DuplicateEntryError:
             # 一意制約に引っかかった場合は重複メッセージを表示。
-            toast(get_text("deck_registration.toast_duplicate"))
+            notify(get_text("deck_registration.toast_duplicate"))
             return
         except DatabaseError as exc:
             # 予期せぬ DB エラーはログに残し、汎用エラーメッセージを表示。
             log_db_error("Failed to add deck", exc, name=name)
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         # DB への反映が成功したらアプリ状態を更新し、フォームをクリア。
         app.decks = db.fetch_decks()
-        toast(get_text("deck_registration.toast_registered"))
+        notify(get_text("deck_registration.toast_registered"))
         self.ids.name_field.text = ""
         self.ids.description_field.text = ""
         self.update_deck_list()
@@ -92,18 +94,18 @@ class DeckRegistrationScreen(BaseManagedScreen):
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is None:
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         try:
             db.delete_deck(name)
         except DatabaseError as exc:
             log_db_error("Failed to delete deck", exc, name=name)
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         app.decks = db.fetch_decks()
-        toast(get_text("deck_registration.toast_deleted"))
+        notify(get_text("deck_registration.toast_deleted"))
         self.update_deck_list()
 
 

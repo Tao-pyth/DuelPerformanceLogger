@@ -5,10 +5,11 @@ from __future__ import annotations
 from kivy.core.window import Window
 from kivy.properties import StringProperty
 from kivymd.app import MDApp
-from kivymd.toast import toast
 
 from function.cmn_app_state import get_app_state, get_fallback_state
 from function.cmn_resources import get_text
+# 共通通知ヘルパーで通知手段を統合。
+from function.core.ui_notify import notify
 
 from .base import BaseManagedScreen
 
@@ -36,7 +37,7 @@ class SettingsScreen(BaseManagedScreen):
         fallback = get_fallback_state()
         fallback.ui_mode = mode
         self.selected_mode = mode
-        toast(get_text("settings.mode_updated"))
+        notify(get_text("settings.mode_updated"))
 
     def _update_backup_label(self) -> None:
         """最新のバックアップパスを表示用ラベルへ反映。"""
@@ -57,18 +58,18 @@ class SettingsScreen(BaseManagedScreen):
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is None:
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         try:
             backup_path = db.export_backup()
         except Exception:  # pragma: no cover - defensive
-            toast(get_text("settings.backup_failure"))
+            notify(get_text("settings.backup_failure"))
             return
 
         db.record_backup_path(backup_path)
         self._update_backup_label()
-        toast(get_text("settings.backup_success"))
+        notify(get_text("settings.backup_success"))
 
     def open_db_init_dialog(self):
         """DB 初期化を実行するか確認するダイアログを表示。"""
@@ -90,7 +91,7 @@ class SettingsScreen(BaseManagedScreen):
         app = get_app_state()
         db = getattr(app, "db", None)
         if db is None:
-            toast(get_text("common.db_error"))
+            notify(get_text("common.db_error"))
             return
 
         try:
@@ -110,10 +111,10 @@ class SettingsScreen(BaseManagedScreen):
             fallback.current_match_count = 0
             fallback.opponent_decks = []
         except Exception:  # pragma: no cover - defensive
-            toast(get_text("settings.db_init_failure"))
+            notify(get_text("settings.db_init_failure"))
             return
 
-        toast(get_text("settings.db_init_success"))
+        notify(get_text("settings.db_init_success"))
 
     def exit_app(self):
         """アプリケーションを安全に終了させる。"""
