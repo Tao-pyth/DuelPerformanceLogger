@@ -77,7 +77,6 @@ KV ファイルの文法や依存関係の崩れを早期に検知したい。
 
 **Tasks**
 
-- `<AppToolbar@MDToolbar>` や `<ConfirmDialog@MDDialog>`、`<PrimaryButton@...>` 等の定義を追加する。
 - 2〜3 画面で置き換え例を追加する。
 - ガイドとして簡易コメントや README の断片を追記する。
 
