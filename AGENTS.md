@@ -80,7 +80,7 @@ in the Duel Performance Logger (DPL) project.
 
 - Always run migration tests before tagging a release.
 - Verify:
-- Kivy/KivyMD screens load successfully (KV integrity).
+- Eel フロントエンドが起動し、主要ビューが読み込まれること。
 - Japanese font registration (mgenplus) succeeds.
 - DB and config migration logs show correct version increments.
 - Updater.exe can perform a replace-and-relaunch cycle on Windows 10/11.

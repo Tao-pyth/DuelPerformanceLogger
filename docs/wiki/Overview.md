@@ -1,16 +1,16 @@
 # DuelPerformanceLogger Wiki / デュエルパフォーマンスロガー Wiki
 
 ## Project Snapshot / プロジェクトの概況
-- **Purpose / 目的**: KivyMD 製のデスクトップアプリとしてデュエル（対戦）結果を記録・分析し、デッキ改善に役立てる。`main.py` がアプリ本体を起動し、各画面は `function/screen` 配下のモジュールとして分離されたユーティリティ群から構成される。
+- **Purpose / 目的**: Eel ベースのデスクトップアプリとしてデュエル（対戦）結果を記録・分析し、デッキ改善に役立てる。`main.py` が Python/Eel ブリッジを起動し、フロントエンドは `resource/web/` 内の HTML/CSS/JS で構成される。
 - **Current Focus / 現在の焦点**: デッキ・シーズン・対戦ログの登録と閲覧、データベースバックアップ、UI 表示モード切り替えなどの基盤機能を提供するためのインフラ整備。
-- **Status / 状況**: UI 部品の共通化（ヘッダー生成など）、ローカライズ済み文字列リソース、設定・ログ・DB 周りの管理コードが実装済み。画面遷移や入力フォームのレイアウトは `function/screen` の各モジュールへ分割され、`main.py` は画面登録とアプリ初期化に集中。
+- **Status / 状況**: UI コンポーネントは `resource/web/static/` に集約され、ローカライズ済み文字列リソース、設定・ログ・DB 周りの管理コードが実装済み。`main.py` は Eel ブートストラップと状態スナップショット API (`fetch_snapshot`) を提供する。
 
 ## Application Architecture / アプリケーションアーキテクチャ
 ### UI & State Management / UI と状態管理
-- `main.py` は KivyMD アプリ本体であり、画面管理 (`MDScreenManager`) や初期化処理を担う。具体的な UI ロジックは `function/screen` 配下の個別モジュールに定義され、責務が分離された。
-- `function.cmn_app_state.get_fallback_state()` が返す `_FallbackAppState` により、`MDApp` が起動していない状態でも設定やデータベース接続などの属性へアクセス可能。テストやスクリプト実行時の安全装置として機能する。
-- `function.screen.base.build_header` のような UI ヘルパーで、画面上部の共通ヘッダー（タイトル、戻る・トップボタン）を再利用可能にしている。
-- 各 `Screen` クラスは制御ロジックと状態公開のみを担当し、ウィジェットツリーは `resource/theme/gui/screens/<ClassName>.kv` に定義する。`MatchEntryScreen` で導入したパターンに従い、`BooleanProperty`・`StringProperty` などで UI 状態を表現し、KV 側でバインドして見た目を更新する。
+- `main.py` は Eel を初期化し、`fetch_snapshot` を通じて最新のアプリ状態 (`AppState`) をフロントエンドへ提供する。
+- `function.cmn_app_state.AppState` がアプリ全体の状態を保持し、デッキ/シーズン/対戦ログの一覧や DB ハンドルを統合管理する。
+- フロントエンドは `resource/web/static/js/app.js` で DOM を更新し、Eel 経由で Python と通信する。通知は `show_notification` を公開して受け取る。
+- 共通スタイルは `resource/web/static/css/` の CSS 変数で統一し、HTML テンプレートは `resource/web/index.html` を起点に構成する。
 
 ### Localization Resources / ローカライズリソース
 - `function.cmn_resources.get_text` は `resource/theme/json/strings.json` の辞書データからドット区切りキーで文言を取得。`lru_cache` により I/O を最小化。
@@ -42,12 +42,12 @@
 ## Existing Assets / 既存リソース
 - `resource/theme/json/strings.json`: UI 用文言の定義。
 - `resource/theme/config.conf`: アプリ設定のデフォルトファイル（INI 形式、読み取り専用）。
+- `resource/web/`: HTML/CSS/JS などのフロントエンド資産。
 - `resource/db/`: SQLite データベース保存先（`.gitkeep` で空ディレクトリを保持）。
 - `resource/log/`: アプリケーションログの出力先。
-- `resource/theme/font/`: 日本語フォント配置想定ディレクトリ（`main.py` で `mgenplus-1c-regular.ttf` を参照）。
 
 ## Developer Notes / 開発メモ
-- KivyMD ベースのため、開発環境には Kivy/KivyMD と依存ライブラリのセットアップが必要。
+- Eel ベースのため、開発環境には Python ランタイムと Chromium/Edge WebView2 の利用可能なブラウザが必要。`requirements.txt` で指定した Eel バージョンをインストールする。
 - アプリ起動前に `DatabaseManager.ensure_database()` を呼び出しておくと、スキーマ整合性が保証される。
 - ログディレクトリやテーマリソースは `Path.resolve()` を使ってルート相対で参照しており、配布パッケージ化する際は相対パス構成を維持すること。
 
@@ -55,3 +55,5 @@
 - 画面ごとのスクリーンショットや UI フロー図の追記。
 - データベーススキーマの ER 図やマイグレーション履歴の整理。
 - テスト戦略（ユニットテスト/統合テスト）のドキュメント化。
+
+**Last Updated:** 2025-11-05

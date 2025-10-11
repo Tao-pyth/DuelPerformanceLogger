@@ -5,7 +5,7 @@
 ## テストスコープ
 
 - コアロジック (migrations, config, updater scheduling)
-- UI (Kivy/KivyMD screens, KV bindings)
+- UI (Eel web front-end, DOM rendering)
 - 非同期処理 (scheduler, progress updates)
 - リリースパッケージ (Main.exe, Updater.exe)
 
@@ -13,8 +13,8 @@
 
 | タイプ | コマンド | 説明 |
 |--------|----------|------|
-| 単体テスト | `pytest` | `tests/core`, `tests/async`, `tests/ui` |
-| スナップショット | `pytest -m snapshot` | UI ツリーチェック |
+| 単体テスト | `pytest` | `tests/core`, `tests/async`, `tests/web` |
+| スナップショット | `npx playwright test --grep @ui-snapshot` | DOM スナップショット |
 | マイグレーション | `pytest -m migration` | バージョンアップ・ダウングレード検証 |
 | E2E (Windows) | `scripts/tests/run_e2e.ps1` | PyInstaller ビルドと Updater シナリオ |
 
@@ -34,7 +34,7 @@
 
 ## 自動化
 
-- GitHub Actions で `pytest` を並列実行 (core/ui, async/migration)。
+- GitHub Actions で `pytest` を並列実行 (core/web, async/migration)。
 - Nightly で E2E テストを Windows ランナーにて実施。
 - 成果物の SHA256 を算出し、`artifacts/checksums.txt` に記録。
 
@@ -45,4 +45,4 @@
 - [ ] Updater による自動再起動が成功。
 - [ ] UI の日本語表示を目視確認。
 
-**Last Updated:** 2025-10-12
+**Last Updated:** 2025-11-05

@@ -59,16 +59,16 @@ def iter_documents() -> Iterable[Document]:
 
             | Item | Baseline | Notes |
             | ---- | -------- | ----- |
-            | Python | 3.13.x | Windows 10/11 (64bit) を想定した Kivy/KivyMD ランタイム。 |
+            | Python | 3.13.x | Windows 10/11 (64bit) を想定した Eel ランタイム。 |
             | Pip | pip >= 23 | `requirements.txt` を `--constraint` なしでインストール。 |
             | Build Tooling | PyInstaller 6.x onefolder | `scripts/pyinstaller/duel_logger.spec` を使用。 |
-            | UI Toolkit | Kivy 2.3.1, KivyMD 1.2.0 | SDL2 / ANGLE バイナリ依存を事前に取得。 |
+            | UI Bridge | Eel 0.16.x | Chromium/Edge WebView2 ランタイムを利用。 |
             | Packaging Host | GitHub Actions `windows-latest` | ビルド成果物は Release Assets のみに配置。 |
 
             ## 1. Python Setup
             - 仮想環境を推奨。`python -m venv .venv && .venv\\Scripts\\activate`。
-            - `pip install -r requirements.txt` 実行後に `kivy` が GPU 対応のバイナリを参照しているか確認。
-            - Windows では `set KIVY_NO_CONSOLELOG=1` を `.env` に設定し、ログノイズを抑止。
+            - `pip install -r requirements.txt` 実行後に Eel が `eel.js` を提供できることを確認。
+            - Windows では WebView2 ランタイムがインストール済みか確認し、必要なら Microsoft 公式インストーラを適用。
 
             ## 2. OS Dependencies
             - Visual C++ 再頒布パッケージ 2019 以降をインストール。
@@ -78,7 +78,7 @@ def iter_documents() -> Iterable[Document]:
             ## 3. Tooling Matrix
             - テキストエディタは UTF-8 (BOM 無し) 固定。
             - `black` 23.x, `ruff` 0.6.x, `mypy` 1.10.x を静的検査ツールとして採用。
-            - UI レイアウト確認用に `kivy_inspector` を利用可。実機動作は常にウィンドウサイズ 1280x720 以上で確認する。
+            - Web UI は Chromium/Edge で確認し、ウィンドウサイズ 1280x720 以上を推奨。
 
             ## 4. Verification Checklist
             1. `python -m compileall app/` でバイトコード生成が警告なく通るか。
@@ -100,10 +100,10 @@ def iter_documents() -> Iterable[Document]:
             - `function/` 配下は **domain-first** でモジュールを分割する。`cmn_*.py` は共通ヘルパーのみに限定。
             - Import 文では `try/except` を禁止。依存欠如はインストール手順側で解決する。
             - `Path` を直接連結せず、`function.core.paths` に定義したファクトリを経由する。
-            - Kivy プロパティは `StringProperty` 等の型を明示し、`ObjectProperty(None)` の濫用を避ける。
+            - Eel ブリッジ関数は `app/function/web/` 配下で管理し、Python 側の `eel.expose` は `app/main.py` に集約する。
 
             ## 2. Naming Rules
-            - 画面クラスは `<Feature>NameScreen` (例: `MatchEntryScreen`) とし、対応する KV は `resource/theme/gui/screens/<Feature>NameScreen.kv`。
+            - Web UI のビューは `resource/web/` に配置し、HTML テンプレートは `index.html` からの相対パスで読み込む。
             - DB アクセサは `fetch_*`, `insert_*`, `update_*`, `delete_*` の 4 系列に揃える。
             - DSL (YAML) のキーは `snake_case`、UI に表示する識別子は `Sentence case` を採用。
 
@@ -114,7 +114,7 @@ def iter_documents() -> Iterable[Document]:
 
             ## 4. Testing Discipline
             - 機能追加時は `tests/` に回帰テストを追加し、**少なくとも 1 つ**のハッピーパスと 1 つの異常系をカバーする。
-            - UI 変更時は `resource/theme/gui/screens/` 配下の KV を `kivy_parser` で lint し、無効なプロパティを検出する。
+            - UI 変更時は `resource/web/static/js/` を `npx eslint --ext .js` で lint し、`npx prettier` で整形を確認する。
             - マイグレーション実装時は `tests/migration` にスナップショット DB を追加し、`pytest -k migration` を実行する。
 
             ## 5. Documentation
@@ -193,19 +193,19 @@ def iter_documents() -> Iterable[Document]:
             # 04. Async & Progress Policy / 非同期処理・進捗表示方針
 
             ## 1. Threading Rules
-            - UI スレッド (Kivy メインループ) で重い処理は実行しない。`function.cmn_async.run_in_executor` を利用。
-            - 同期 I/O は `ThreadPoolExecutor(max_workers=4)` に委譲し、戻り値は `Clock.schedule_once` で UI へ反映。
-            - Python の `asyncio` は採用しない。Kivy の event loop と整合しないため。
+            - UI スレッド (Eel/Bottle メインループ) で重い処理は実行しない。`concurrent.futures.ThreadPoolExecutor` を利用。
+            - 同期 I/O は専用 Executor に委譲し、完了後は `notify()` または `fetch_snapshot` の再取得で反映する。
+            - Python の `asyncio` は採用しない。Eel の同期ループと整合しないため。
 
             ## 2. Progress Feedback
-            - 長時間処理 (> 500ms) は必ずプログレス表示 (ダイアログ or snackbar) を出す。
+            - 長時間処理 (> 500ms) は必ずプログレス表示 (toast または進行バー) を出す。
             - 進捗率が不明な処理はインジケータをインデターミネイト表示に設定し、タイムアウト時はリトライ導線を用意。
             - CSV エクスポートなど、完了時にはトースト通知で保存先パスを表示。
 
             ## 3. Cancellation & Retry
             - Updater.exe 実行時はキャンセル不可。代わりに `--dry-run` オプションを提供し、検証モードで動作確認。
             - DB マイグレーションは途中失敗時に自動ロールバックし、再実行は安全であることを保証。
-            - 非同期タスクは `function.cmn_async.AsyncJobRegistry` で追跡し、重複実行を防止。
+            - 非同期タスクは専用レジストリで追跡し、重複実行を防止する（今後整備）。
 
             ## 4. Testing Guidance
             - `tests/async/test_job_registry.py` を追加し、重複タスク抑止ロジックを単体テスト。
