@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Duel Performance Logger</title>
+    <link rel="stylesheet" href="static/css/main.css" />
+    <script type="text/javascript" src="/eel.js"></script>
+    <script type="module" src="static/js/app.js" defer></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="app-header__titles">
+        <h1>Duel Performance Logger</h1>
+        <p class="app-header__subtitle">Eel ベース UI プロトタイプ</p>
+      </div>
+      <div class="app-header__status">
+        <span id="app-version">DPL.?.?.?</span>
+        <button id="refresh-button" type="button">最新の状態を取得</button>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <section class="panel" aria-labelledby="migration-title">
+        <h2 id="migration-title">移行結果</h2>
+        <p id="migration-result" class="panel__body panel__body--muted">
+          初期化処理の結果はまだ取得されていません。
+        </p>
+      </section>
+
+      <section class="panel" aria-labelledby="summary-title">
+        <h2 id="summary-title">データサマリー</h2>
+        <dl class="summary-grid">
+          <div>
+            <dt>デッキ数</dt>
+            <dd id="deck-count">0</dd>
+          </div>
+          <div>
+            <dt>シーズン数</dt>
+            <dd id="season-count">0</dd>
+          </div>
+          <div>
+            <dt>対戦ログ数</dt>
+            <dd id="match-count">0</dd>
+          </div>
+          <div>
+            <dt>UI モード</dt>
+            <dd id="ui-mode">normal</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel" aria-labelledby="recent-matches-title">
+        <h2 id="recent-matches-title">最新の対戦ログ</h2>
+        <table class="data-table" id="matches-table">
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">デッキ</th>
+              <th scope="col">相手デッキ</th>
+              <th scope="col">ターン</th>
+              <th scope="col">結果</th>
+              <th scope="col">記録時刻</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="6" class="data-table__empty">まだデータがありません。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

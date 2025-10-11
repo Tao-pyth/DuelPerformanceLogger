@@ -6,11 +6,11 @@ This document describes the top-level layout of the Duel Performance Logger repo
 
 | Path | Owner | Description |
 |------|-------|-------------|
-| `app/` | Core Engineering | Application source code (Python/Kivy). |
+| `app/` | Core Engineering | Application source code (Python/Eel orchestration). |
 | `app/function/core/` | Core Engineering | Core services: paths, config, migrations, versioning. |
-| `app/function/ui/` | UI Team | Screen controllers, widgets, and KV integration. |
+| `app/function/web/` | UI Team | Eel bridge modules and exposed RPC handlers. |
 | `app/resource/` | Core + UI | Runtime assets bundled into build. |
-| `resource/` | Content Team | Static fonts, icons, localization files. |
+| `resource/` | Content Team | Static fonts, icons, localization files, and web assets. |
 | `docs/` | Documentation Team | Authoritative policy and process manuals. |
 | `scripts/pyinstaller/` | Build & Release | PyInstaller spec and packaging scripts. |
 | `.github/workflows/` | DevOps | CI pipeline definitions. |
@@ -28,7 +28,7 @@ DuelPerformanceLogger/
 └── vcruntime140.dll ...
 ```
 
-- `Main.exe` is the PyInstaller bootstrap that launches the Kivy application.
+- `Main.exe` is the PyInstaller bootstrap that launches the Eel application.
 - `Updater.exe` is copied into the same folder but executed from `%TEMP%` during updates.
 - All Python modules are zipped within `app/` by PyInstaller but retain importable paths via `sys._MEIPASS`.
 
@@ -41,7 +41,7 @@ DuelPerformanceLogger/
 ## Interface Contracts
 
 - `app/function/core/paths.py` abstracts filesystem locations. Any new modules must consume these helpers.
-- KV files under `app/function/ui/kv/` are loaded by name in `app/function/ui/loader.py`; follow naming `*.kv` mirroring screen classes.
+- Web assets live under `resource/web/` and are loaded via the centralized Eel bootstrap in `app/main.py`.
 - Updater CLI contract is detailed in `[05_error_taxonomy](05_error_taxonomy.md)` and `[08_release](08_release.md)`.
 
 ## Dependency Boundaries
@@ -57,4 +57,4 @@ DuelPerformanceLogger/
 - [ ] Paths resolved exclusively via `core.paths` helpers.
 - [ ] Updater references keep CLI version in sync.
 
-**Last Updated:** 2025-10-12
+**Last Updated:** 2025-11-05

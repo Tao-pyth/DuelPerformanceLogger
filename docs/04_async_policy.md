@@ -4,28 +4,28 @@
 
 ## ランタイムモデル
 
-- メインループ: Kivy の UI スレッド上で動作。
-- 非同期タスク: `asyncio` ベースで `core.async.scheduler` が管理。
-- スレッド利用: ブロッキング I/O は `ThreadPoolExecutor` にオフロードし、UI 更新は `@mainthread` で復帰する。
+- メインループ: Eel (Bottle + Chromium) が Python 側で同期実行し、UI はブラウザスレッドで描画。
+- 非同期タスク: Python 側は `asyncio` ではなく `concurrent.futures.ThreadPoolExecutor` に集約し、完了後に `eel.spawn` で UI へ通知。
+- スレッド利用: ブロッキング I/O は専用 Executor へ移し、UI 更新は `notify()` または `fetch_snapshot` 再実行で反映する。
 
 ## タスク登録フロー
 
-1. `scheduler.enqueue(coro, *, progress_token, cancel_token)` でタスクを登録。
-2. `progress_token` は `ui.events.bus` 経由で進行率を publish。
-3. `cancel_token` は `ui.dialogs.confirm_cancel` などから設定され、タスクは `CancelledError` を発火する。
-4. タスク完了時は `scheduler.finalize()` がログ出力し、必要に応じてトースト通知を表示。
+1. `core.async.run_in_executor(fn, *, progress_callback)` でタスクを登録する（将来的な共通 API）。
+2. 進行状況は Python 側から `eel.show_progress(progress)` を呼び出し、JS でレンダリングする。
+3. キャンセルは共有 `threading.Event` を引数に受け渡し、UI のボタンから `eel.request_cancel()` を発火させる。
+4. タスク完了時はロガーへ結果を書き込み、`notify()` でユーザーへ完了メッセージを送る。
 
 ## 進行表示 (Progress)
 
-- `ProgressOverlay` は 0.0〜1.0 の値を受け取り、`Updater` 進行と共通の UI コンポーネントを使用。
-- 長時間処理 (> 1s) は必ず進行表示を出す。
-- DSL マイグレーションはステップ単位で 0.1 ずつ進行率を増加させる。
+- `resource/web/static/js/app.js` の進行バーコンポーネントに 0.0〜1.0 の値を渡す。
+- 長時間処理 (> 1s) は必ずフロントエンドへ進行率を送出する。
+- DSL マイグレーションは各ステップ完了ごとに 0.1 ずつ進行率を増加させる。
 
 ## エラーハンドリング
 
-- すべてのタスクは `core.errors.AsyncTaskError` でラップされる。
+- すべてのタスクは `core.errors.AsyncTaskError` （予定）でラップし、UI へは一般化したエラーメッセージを送る。
 - Updater 連携時のエラーは `[05_error_taxonomy](05_error_taxonomy.md)` に従いリトライ／フォールバック処理を実施。
-- 非同期例外は `logs/app.log` に `ASYNC` タグ付きで出力。
+- 非同期例外は `logs/app.log` に `ASYNC` タグ付きで出力し、JS 側にも通知する。
 
 ## タイムアウトとリトライ
 
@@ -43,9 +43,9 @@
 
 ## テスト
 
-- `tests/async/test_scheduler.py` にユニットテストを追加し、成功・キャンセル・例外ケースを網羅。
+- `tests/async/test_executor.py`（予定）にユニットテストを追加し、成功・キャンセル・例外ケースを網羅。
 - `pytest -m async` で非同期テストを実行。
-- 進行通知は `tests/ui/test_progress_overlay.py` のスナップショットで検証。
+- 進行通知は Playwright/E2E テストで検証し、DOM の進行バーが更新されることを確認する。
 
 ## Checklist
 
@@ -54,4 +54,4 @@
 - [ ] エラーハンドリングが分類表と一致。
 - [ ] 非同期テストタグを更新。
 
-**Last Updated:** 2025-10-12
+**Last Updated:** 2025-11-05

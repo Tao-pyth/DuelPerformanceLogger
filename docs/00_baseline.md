@@ -8,8 +8,8 @@ Duel Performance Logger (DPL) targets Windows 10/11 desktop environments, packag
 |-----------|---------|-------|
 | OS | Windows 10 22H2 / Windows 11 23H2 | Primary execution environment |
 | Python | 3.13.x (CPython) | Used for development and PyInstaller builds |
-| Kivy | 2.3.1 | UI framework |
-| KivyMD | 1.2.0 | Bundled with app resources |
+| Eel | 0.16.x | UI bridge (Chromium/Edge runtime) |
+| Web Assets | ES2020+, CSS Grid | Served from `resource/web/` |
 | SQLite | 3.45+ | Embedded via Python stdlib |
 | PyInstaller | 6.x | One-folder packaging |
 
@@ -23,8 +23,8 @@ Duel Performance Logger (DPL) targets Windows 10/11 desktop environments, packag
 
 ## Fonts and Localization
 
-- Bundle `mgenplus-1p-regular.ttf` and `mgenplus-1p-bold.ttf` inside `resource/fonts/`.
-- Register fonts at runtime via `app/function/ui/fonts.py`; migrations ensure registration entries exist.
+- Bundle `mgenplus-1p-regular.ttf` and `mgenplus-1p-bold.ttf` inside `resource/fonts/` for PDF/export flows.
+- Web UI loads fonts through CSS `@font-face` declarations defined in `resource/web/static/css/`.
 - Verify Japanese UI strings using Windows IME before release.
 
 ## Storage Layout
@@ -59,4 +59,4 @@ Duel Performance Logger (DPL) targets Windows 10/11 desktop environments, packag
 - [ ] Fonts validated with Japanese UI.
 - [ ] CI artifacts include both `Main.exe` and `Updater.exe`.
 
-**Last Updated:** 2025-10-29
+**Last Updated:** 2025-11-05

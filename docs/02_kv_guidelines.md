@@ -1,53 +1,56 @@
-# 02. KV & UI Layout Guidelines
+# 02. Web UI Layout Guidelines / Web UI レイアウト指針
 
-This guide defines the conventions for Kivy/KivyMD KV files and screen implementations within Duel Performance Logger.
+This guide defines the conventions for HTML/CSS/JavaScript assets that power the
+Eel-based interface of Duel Performance Logger.
 
-## File Organization
+## File Organization / ファイル構成
+- HTML entry points live in `resource/web/` (e.g., `index.html`).
+- Static assets reside under `resource/web/static/` and are grouped by type
+  (`css/`, `js/`, `img/`).
+- Python-side bridge helpers belong to `app/function/web/` and expose
+  functionality through `app/main.py`.
 
-- KV files reside under `app/function/ui/kv/` and mirror their Python controller names (e.g., `menu_screen.py` → `menu_screen.kv`).
-- Screens inherit from `MDScreen` and register in `app/function/ui/router.py`.
-- Reusable components live in `app/function/ui/widgets/` with matching KV partials.
-
-## Naming Conventions
-
+## Naming Conventions / 命名規則
 | Element | Convention | Example |
 |---------|------------|---------|
-| Screen classes | `PascalCaseScreen` | `MenuScreen` |
-| KV ids | `snake_case` | `start_button` |
-| Properties | `snake_case` | `progress_ratio` |
-| Translations | `strings.<context>.<key>` | `strings.menu.start` |
+| CSS classes | BEM-style (`block__element--modifier`) | `app-header__status` |
+| JavaScript modules | `kebab-case.js` | `app.js` |
+| Data attributes | `data-*` kebab case | `data-visible` |
+| Translation keys | `strings.<context>.<key>` | `strings.menu.start` |
 
-## Styling Rules
+## Styling Rules / スタイリングルール
+- Declare palette tokens in `:root` CSS variables and reuse throughout the UI.
+- Prefer modern layout primitives (CSS Grid / Flexbox) over manual pixel math.
+- Keep responsive breakpoints at 720px and 1280px to match desktop layouts.
+- Register custom fonts through CSS `@font-face`; do not manipulate fonts in
+  Python.
 
-- Use theme palettes defined in `ui/theme.py`; do not hardcode colors.
-- Font families reference registered names (`"MgenPlus"`).
-- Default spacing units: `dp(12)` for padding, `dp(8)` for spacing, unless UX specifies otherwise.
-- Responsive layouts must adapt to widths from 1024px to 1920px.
+## Scripting & Data Flow / スクリプトとデータフロー
+1. All calls from JavaScript to Python go through `eel.<function>()`. Wrap the
+   promise with `await` and handle errors with `try/await/catch`.
+2. Python sends notifications via `app/function/core/ui_notify.notify`; the
+   front-end must expose `show_notification` through `eel.expose`.
+3. Keep DOM mutations in dedicated render helpers (e.g., `renderMatches`) and
+   avoid inline `onclick` attributes.
+4. Store transient UI state in module-scoped variables; persistent data remains
+   in SQLite and is served via `fetch_snapshot`.
 
-## Binding & Logic
+## Accessibility / アクセシビリティ
+- Provide `aria-live` regions for real-time updates (e.g., toast component).
+- Ensure color contrast meets WCAG AA (4.5:1) using the shared palette.
+- Maintain keyboard focus order with semantic HTML elements and `tabindex` only
+  when necessary.
 
-1. Keep business logic in Python controllers; KV should only declare bindings.
-2. Use `@mainthread` decorators for UI updates triggered from async tasks.
-3. `Updater` progress is surfaced via `ProgressOverlay`; update values through `ui.events.bus`.
-4. Use `ui.state.AppState` for cross-screen data. Avoid global variables.
+## Testing / テスト
+- Lint JavaScript with `npx eslint --ext .js resource/web/static/js`.
+- Format HTML/CSS/JS using `npx prettier --check resource/web`.
+- Use Playwright smoke tests (planned) to assert critical flows once automated
+  coverage is available.
 
-## Accessibility
+## Checklist / チェックリスト
+- [ ] New assets placed under the correct `static/` subfolder.
+- [ ] CSS variables reused instead of hard-coded colors.
+- [ ] Eel bridge function exposed in both Python and JavaScript.
+- [ ] Lint/format tools executed before submission.
 
-- Provide `accessibility_text` for actionable widgets where supported.
-- Ensure contrast ratio meets WCAG AA (> 4.5:1) on default themes.
-- For keyboard navigation, map `on_key_down` handlers to focus the next widget.
-
-## Testing
-
-- Snapshot tests reside in `tests/ui/test_screens.py` and rely on screen factory fixtures.
-- Add new screens to the snapshot registry with expected widget tree counts.
-- Validate KV syntax using `python -m app.tools.kv_lint`.
-
-## Checklist
-
-- [ ] KV filename matches controller module.
-- [ ] Theme colors sourced from `ui/theme.py`.
-- [ ] Async callbacks marshal to main thread.
-- [ ] Snapshot tests updated.
-
-**Last Updated:** 2025-10-12
+**Last Updated:** 2025-11-05

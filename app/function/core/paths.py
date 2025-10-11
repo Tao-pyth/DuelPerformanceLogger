@@ -50,10 +50,10 @@ def theme_path(*parts: str) -> Path:
     return resource_path("theme", *parts)
 
 
-def gui_path(*parts: str) -> Path:
-    """Return a path within the GUI resource directory."""
+def web_path(*parts: str) -> Path:
+    """Return a path within the web (Eel) asset directory."""
 
-    return theme_path("gui", *parts)
+    return resource_path("web", *parts)
 
 
 @lru_cache(maxsize=1)
@@ -121,10 +121,10 @@ def strings_path() -> Path:
     return theme_path("json", "strings.json")
 
 
-def gui_root() -> Path:
-    """Return the root directory containing KV definitions."""
+def web_root() -> Path:
+    """Return the root directory containing bundled web assets."""
 
-    return gui_path()
+    return web_path()
 
 
 __all__ = [
@@ -134,8 +134,6 @@ __all__ = [
     "config_path",
     "database_dir",
     "default_config_path",
-    "gui_path",
-    "gui_root",
     "log_dir",
     "package_root",
     "project_root",
@@ -143,5 +141,7 @@ __all__ = [
     "resource_root",
     "strings_path",
     "theme_path",
+    "web_path",
+    "web_root",
     "user_data_root",
 ]

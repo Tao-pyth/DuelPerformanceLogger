@@ -9,19 +9,22 @@
     整理されます。
 """
 
+from .cmn_app_state import (
+    AppState,
+    build_state,
+    get_app_state,
+    reset_app_state,
+    set_app_state,
+)
 from .cmn_database import DatabaseManager, DatabaseError, DuplicateEntryError
 
-
-def get_app_state():
-    """Lazy loader for :func:`cmn_app_state.get_app_state` to avoid Kivy imports."""
-
-    from .cmn_app_state import get_app_state as _get_app_state
-
-    return _get_app_state()
-
 __all__ = [
+    "AppState",
     "DatabaseManager",
     "DatabaseError",
     "DuplicateEntryError",
+    "build_state",
     "get_app_state",
+    "reset_app_state",
+    "set_app_state",
 ]

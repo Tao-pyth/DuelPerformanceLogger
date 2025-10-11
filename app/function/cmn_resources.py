@@ -9,9 +9,9 @@ from typing import Any
 from app.function.core import paths
 
 
-# NOTE: Kivy の UI テキストは JSON ファイルにまとめて保存しています。
+# NOTE: 旧 Kivy 版から継承した UI テキスト JSON を引き続き利用しています。
 # このモジュールではファイルの読み込み・キャッシュ・アクセス用ヘルパーを提供し、
-# 画面側がシンプルな `get_text("menu.title")` といった呼び出しで文字列を取得できる
+# Eel フロントエンドからもシンプルに `get_text("menu.title")` で文字列を取得できる
 # ようにしています。
 
 # 文字列リソースが格納されているファイルパスを centralized path helper から取得。

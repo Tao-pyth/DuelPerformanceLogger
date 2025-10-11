@@ -1,29 +1,32 @@
-"""Cross-platform notification helpers for Kivy-based screens.
-
-This module exposes :func:`notify` to present short user notifications in a
-platform-aware way. Android devices use the native toast implementation while
-other platforms fall back to :class:`~kivymd.uix.snackbar.Snackbar`.
-"""
+"""Notification helpers for the Eel-powered interface."""
 
 from __future__ import annotations
 
-from kivy.utils import platform
-from kivymd.uix.snackbar import Snackbar
+import logging
+
+try:  # pragma: no cover - import guard for optional dependency
+    import eel  # type: ignore
+except Exception:  # pragma: no cover - defensive fallback if Eel is unavailable
+    eel = None  # type: ignore
+
+logger = logging.getLogger(__name__)
 
 
 def notify(text: str, duration: float = 1.5) -> None:
-    """Display a notification appropriate for the current platform."""
+    """Display a non-blocking toast message in the web frontend."""
 
-    if platform == "android":
+    duration_ms = max(int(duration * 1000), 0)
+
+    if eel is not None:
         try:
-            from kivymd.toast import toast
-
-            toast(text)
+            eel.show_notification(text, duration_ms)
             return
-        except Exception:  # pragma: no cover - defensive, platform specific
-            pass
+        except AttributeError:  # JS side has not exposed the notification hook yet
+            logger.debug("Eel front-end has no show_notification hook; falling back to log")
+        except Exception:  # pragma: no cover - depends on runtime Eel availability
+            logger.exception("Failed to forward notification to Eel front-end")
 
-    Snackbar(text=text, duration=duration).open()
+    logger.info("UI notification: %s", text)
 
 
 __all__ = ["notify"]
