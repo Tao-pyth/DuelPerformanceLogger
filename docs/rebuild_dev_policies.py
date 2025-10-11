@@ -59,10 +59,10 @@ def iter_documents() -> Iterable[Document]:
 
             | Item | Baseline | Notes |
             | ---- | -------- | ----- |
-            | Python | 3.10.x | Windows 10/11 (64bit) を想定した Kivy/KivyMD ランタイム。 |
+            | Python | 3.13.x | Windows 10/11 (64bit) を想定した Kivy/KivyMD ランタイム。 |
             | Pip | pip >= 23 | `requirements.txt` を `--constraint` なしでインストール。 |
             | Build Tooling | PyInstaller 6.x onefolder | `scripts/pyinstaller/duel_logger.spec` を使用。 |
-            | UI Toolkit | Kivy 2.3.x, KivyMD 1.1.x | SDL2 / ANGLE バイナリ依存を事前に取得。 |
+            | UI Toolkit | Kivy 2.3.1, KivyMD 1.2.0 | SDL2 / ANGLE バイナリ依存を事前に取得。 |
             | Packaging Host | GitHub Actions `windows-latest` | ビルド成果物は Release Assets のみに配置。 |
 
             ## 1. Python Setup
