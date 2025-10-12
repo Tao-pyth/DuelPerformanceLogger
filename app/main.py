@@ -12,6 +12,7 @@ from app.function import (
     AppState,
     DatabaseError,
     DatabaseManager,
+    DuplicateEntryError,
     build_state,
     get_app_state,
     set_app_state,
@@ -60,6 +61,67 @@ class DuelPerformanceService:
 
         state = build_state(self.db, self.config, migration_result=self.migration_result)
         return set_app_state(state)
+
+    # ------------------------------------------------------------------
+    # Application operations
+    # ------------------------------------------------------------------
+    def register_deck(self, name: str, description: str) -> AppState:
+        cleaned_name = (name or "").strip()
+        if not cleaned_name:
+            raise ValueError("デッキ名を入力してください")
+        cleaned_description = (description or "").strip()
+        self.db.add_deck(cleaned_name, cleaned_description)
+        return self.refresh_state()
+
+    def register_opponent_deck(self, name: str) -> AppState:
+        cleaned_name = (name or "").strip()
+        if not cleaned_name:
+            raise ValueError("対戦相手デッキ名を入力してください")
+        self.db.add_opponent_deck(cleaned_name)
+        return self.refresh_state()
+
+    def prepare_match(self, deck_name: str) -> dict[str, object]:
+        deck = (deck_name or "").strip()
+        if not deck:
+            raise ValueError("デッキを選択してください")
+        next_match = self.db.get_next_match_number(deck)
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        timestamp = (
+            datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%H:%M:%S（%Y/%m/%d）")
+        )
+        return {
+            "deck_name": deck,
+            "next_match_no": next_match,
+            "timestamp": timestamp,
+        }
+
+    def register_match(self, payload: dict[str, object]) -> AppState:
+        deck_name = str(payload.get("deck_name", "")).strip()
+        if not deck_name:
+            raise ValueError("デッキを選択してください")
+
+        turn = payload.get("turn")
+        if turn not in (True, False):
+            raise ValueError("先攻/後攻を選択してください")
+
+        result = payload.get("result")
+        if result not in (-1, 0, 1):
+            raise ValueError("対戦結果を選択してください")
+
+        opponent = str(payload.get("opponent_deck", "")).strip()
+        match_record = {
+            "match_no": self.db.get_next_match_number(deck_name),
+            "deck_name": deck_name,
+            "turn": bool(turn),
+            "opponent_deck": opponent,
+            "keywords": payload.get("keywords", []),
+            "result": int(result),
+        }
+
+        self.db.record_match(match_record)
+        return self.refresh_state()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -145,6 +207,24 @@ def _build_snapshot(state: Optional[AppState] = None) -> dict[str, Any]:
     return data
 
 
+def _operation_response(service: DuelPerformanceService, func) -> dict[str, Any]:
+    try:
+        state = func()
+    except DuplicateEntryError as exc:
+        return {"ok": False, "error": str(exc)}
+    except DatabaseError as exc:
+        log_db_error("Database operation failed", exc)
+        return {"ok": False, "error": str(exc)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    else:
+        if isinstance(state, AppState):
+            snapshot = _build_snapshot(state)
+        else:
+            snapshot = _build_snapshot()
+        return {"ok": True, "snapshot": snapshot}
+
+
 @eel.expose
 def fetch_snapshot() -> dict[str, Any]:
     """Return the latest state snapshot for the front-end."""
@@ -152,6 +232,40 @@ def fetch_snapshot() -> dict[str, Any]:
     service = _ensure_service()
     state = service.refresh_state()
     return _build_snapshot(state)
+
+
+@eel.expose
+def register_deck(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _ensure_service()
+    name = str(payload.get("name", "")) if payload else ""
+    description = str(payload.get("description", "")) if payload else ""
+    return _operation_response(
+        service, lambda: service.register_deck(name, description)
+    )
+
+
+@eel.expose
+def register_opponent_deck(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _ensure_service()
+    name = str(payload.get("name", "")) if payload else ""
+    return _operation_response(service, lambda: service.register_opponent_deck(name))
+
+
+@eel.expose
+def prepare_match(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _ensure_service()
+    deck_name = str(payload.get("deck_name", "")) if payload else ""
+    try:
+        info = service.prepare_match(deck_name)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "data": info}
+
+
+@eel.expose
+def register_match(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _ensure_service()
+    return _operation_response(service, lambda: service.register_match(payload or {}))
 
 
 def main() -> None:
