@@ -1,0 +1,30 @@
+{
+  "A": [
+    "A00_Baseline_Environment.md",
+    "A01_Coding_Guidelines.md",
+    "A02_Database_Policy.md",
+    "A03_Interface_Control_Core.md",
+    "A04_Async_Policy.md",
+    "A05_Error_Taxonomy.md",
+    "A06_Logging_Strategy.md",
+    "A07_CI_Automation.md",
+    "A08_Project_Structure.md"
+  ],
+  "B": [
+    "B10_Release_Management.md",
+    "B11_Security_Standards.md",
+    "B12_Test_Plan.md",
+    "B13_Update_Deployment.md"
+  ],
+  "C": [
+    "C20_Agent_Policies.md",
+    "C21_Improvement_Proposals.md",
+    "C22_Known_Issues.md",
+    "C23_Rebuild_Policies_Script.py",
+    "C24_Codex_Core_Template.md",
+    "C25_Codex_Doc_Template.md",
+    "C26_Codex_UI_Template.md",
+    "C27_UI_Spec_MenuScreen.md",
+    "C28_Wiki_Overview.md"
+  ]
+}
