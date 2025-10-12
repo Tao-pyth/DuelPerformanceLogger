@@ -24,7 +24,7 @@ _DEFAULT_CONFIG_PATH = paths.default_config_path()
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "database": {
-        "expected_version": 3,
+        "expected_version": 4,
     },
 }
 

@@ -20,7 +20,7 @@ class AppState:
     decks: list[dict[str, Any]] = field(default_factory=list)
     seasons: list[dict[str, Any]] = field(default_factory=list)
     match_records: list[dict[str, Any]] = field(default_factory=list)
-    opponent_decks: list[str] = field(default_factory=list)
+    opponent_decks: list[dict[str, Any]] = field(default_factory=list)
     current_match_settings: Optional[dict[str, Any]] = None
     current_match_count: int = 0
     migration_result: str = ""
@@ -50,7 +50,7 @@ class AppState:
             decks=[dict(item) for item in self.decks],
             seasons=[dict(item) for item in self.seasons],
             match_records=[dict(item) for item in self.match_records],
-            opponent_decks=list(self.opponent_decks),
+            opponent_decks=[dict(item) for item in self.opponent_decks],
             current_match_settings=(
                 dict(self.current_match_settings) if self.current_match_settings else None
             ),

@@ -52,7 +52,7 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    CURRENT_SCHEMA_VERSION = 3
+    CURRENT_SCHEMA_VERSION = 4
     METADATA_DEFAULTS = {
         "schema_version": str(CURRENT_SCHEMA_VERSION),
         "ui_mode": "normal",
@@ -171,7 +171,8 @@ class DatabaseManager:
                 CREATE TABLE decks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
-                    description TEXT DEFAULT ''
+                    description TEXT DEFAULT '',
+                    usage_count INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE seasons (
@@ -182,6 +183,12 @@ class DatabaseManager:
                     start_time TEXT,
                     end_date TEXT,
                     end_time TEXT
+                );
+
+                CREATE TABLE opponent_decks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    usage_count INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE matches (
@@ -285,7 +292,7 @@ class DatabaseManager:
         destination.mkdir(parents=True, exist_ok=True)
 
         with self._connect() as connection:
-            tables = ("decks", "seasons", "matches")
+            tables = ("decks", "opponent_decks", "seasons", "matches")
             for table in tables:
                 cursor = connection.execute(f"SELECT * FROM {table}")
                 columns = [col[0] for col in cursor.description]
@@ -308,7 +315,7 @@ class DatabaseManager:
         restored: dict[str, int] = {}
 
         with self.transaction() as connection:
-            for table in ("decks", "seasons", "matches"):
+            for table in ("decks", "opponent_decks", "seasons", "matches"):
                 file_path = source_path / f"{table}.csv"
                 if not file_path.exists():
                     continue
@@ -357,16 +364,21 @@ class DatabaseManager:
                         count += 1
                     restored[table] = count
 
+        self.recalculate_usage_counts()
         return restored
 
     # ------------------------------------------------------------------
     # 取得系ヘルパー
     # ------------------------------------------------------------------
-    def fetch_decks(self) -> list[dict[str, str]]:
+    def fetch_decks(self) -> list[dict[str, object]]:
         """登録済みデッキを名称順（大文字小文字無視）で返却。"""
         with self._connect() as connection:
             cursor = connection.execute(
-                "SELECT name, description FROM decks ORDER BY name COLLATE NOCASE"
+                """
+                SELECT name, description, usage_count
+                FROM decks
+                ORDER BY name COLLATE NOCASE
+                """
             )
             return [dict(row) for row in cursor.fetchall()]
 
@@ -481,17 +493,22 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     def add_deck(self, name: str, description: str = "") -> None:
         """デッキ定義を追加。重複時は `DuplicateEntryError`。"""
+        cleaned = name.strip()
+        if not cleaned:
+            raise DatabaseError("デッキ名を入力してください")
         try:
             with self._connect() as connection:
                 connection.execute(
                     "INSERT INTO decks (name, description) VALUES (?, ?)",
-                    (name, description),
+                    (cleaned, description),
                 )
         except sqlite3.IntegrityError as exc:  # pragma: no cover - defensive
-            log_error("Duplicate deck insertion attempted", exc, name=name)
-            raise DuplicateEntryError(f"Deck '{name}' already exists") from exc
+            log_error("Duplicate deck insertion attempted", exc, name=cleaned)
+            raise DuplicateEntryError(
+                f"デッキ「{cleaned}」は既に登録されています"
+            ) from exc
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
-            log_error("Failed to insert deck", exc, name=name)
+            log_error("Failed to insert deck", exc, name=cleaned)
             raise DatabaseError("Failed to insert deck") from exc
 
     def add_season(
@@ -563,6 +580,11 @@ class DatabaseManager:
         except (KeyError, ValueError) as exc:
             log_error("Invalid match record supplied", exc, record=record)
             raise DatabaseError("Invalid match record") from exc
+        deck_name = str(record.get("deck_name", "")).strip()
+        if not deck_name:
+            raise DatabaseError("デッキ名を指定してください")
+        opponent_name = str(record.get("opponent_deck", "")).strip()
+
         try:
             with self._connect() as connection:
                 connection.execute(
@@ -574,31 +596,106 @@ class DatabaseManager:
                     """,
                     (
                         record.get("match_no", 0),
-                        record["deck_name"],
+                        deck_name,
                         turn_value,
-                        record.get("opponent_deck", ""),
+                        opponent_name,
                         keywords_json,
                         result_value,
                     ),
                 )
+
+                cursor = connection.execute(
+                    "UPDATE decks SET usage_count = usage_count + 1 WHERE name = ?",
+                    (deck_name,),
+                )
+                if cursor.rowcount == 0:
+                    raise DatabaseError(f"デッキ「{deck_name}」が見つかりません")
+
+                if opponent_name:
+                    connection.execute(
+                        """
+                        INSERT INTO opponent_decks (name, usage_count)
+                        VALUES (?, 1)
+                        ON CONFLICT(name)
+                        DO UPDATE SET usage_count = usage_count + 1
+                        """,
+                        (opponent_name,),
+                    )
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             log_error("Failed to record match", exc, record=record)
             raise DatabaseError("Failed to record match") from exc
 
-    def fetch_opponent_decks(self) -> list[str]:
-        """対戦相手デッキ名を重複排除して取得（プルダウン候補用）。"""
+    def fetch_opponent_decks(self) -> list[dict[str, object]]:
+        """登録済みの対戦相手デッキ一覧を名称順で返却。"""
 
         with self._connect() as connection:
             cursor = connection.execute(
                 """
-                SELECT DISTINCT TRIM(opponent_deck) AS deck
-                FROM matches
-                WHERE opponent_deck IS NOT NULL
-                  AND TRIM(opponent_deck) <> ''
-                ORDER BY deck COLLATE NOCASE
+                SELECT name, usage_count
+                FROM opponent_decks
+                ORDER BY name COLLATE NOCASE
                 """
             )
-            return [row["deck"] for row in cursor.fetchall() if row["deck"]]
+            return [dict(row) for row in cursor.fetchall()]
+
+    def add_opponent_deck(self, name: str) -> None:
+        """対戦相手デッキ定義を追加。重複時は ``DuplicateEntryError``。"""
+
+        cleaned = name.strip()
+        if not cleaned:
+            raise DatabaseError("対戦相手デッキ名を入力してください")
+
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    "INSERT INTO opponent_decks (name, usage_count) VALUES (?, 0)",
+                    (cleaned,),
+                )
+        except sqlite3.IntegrityError as exc:  # pragma: no cover - defensive
+            log_error(
+                "Duplicate opponent deck insertion attempted",
+                exc,
+                name=cleaned,
+            )
+            raise DuplicateEntryError(
+                f"対戦相手デッキ「{cleaned}」は既に登録されています"
+            ) from exc
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to insert opponent deck", exc, name=cleaned)
+            raise DatabaseError("Failed to insert opponent deck") from exc
+
+    def recalculate_usage_counts(self) -> None:
+        """デッキと対戦相手デッキの使用回数を対戦ログから再計算する。"""
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE decks
+                SET usage_count = (
+                    SELECT COUNT(*)
+                    FROM matches
+                    WHERE matches.deck_name = decks.name
+                )
+                """
+            )
+
+            connection.execute("UPDATE opponent_decks SET usage_count = 0")
+            connection.execute(
+                """
+                INSERT INTO opponent_decks (name, usage_count)
+                SELECT name, usage_count
+                FROM (
+                    SELECT TRIM(opponent_deck) AS name, COUNT(*) AS usage_count
+                    FROM matches
+                    WHERE opponent_deck IS NOT NULL
+                      AND TRIM(opponent_deck) <> ''
+                    GROUP BY TRIM(opponent_deck)
+                )
+                WHERE name <> ''
+                ON CONFLICT(name)
+                DO UPDATE SET usage_count = excluded.usage_count
+                """
+            )
 
     # ------------------------------------------------------------------
     # 高度なヘルパー
