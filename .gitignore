@@ -1,5 +1,25 @@
 resource/theme/font/mgenplus-1c-regular.ttf
 resource/db/*.sqlite3
 resource/db/*.db
+
+# Python / venv
+.venv/
 __pycache__/
 */__pycache__/
+*.pyc
+
+# VS Code
+.vscode
+*.vscode/launch.json
+vscode/settings.json
+
+# Build / Dist
+build/
+dist/
+*.spec
+*.exe
+*.dll
+
+# Logs / User data
+logs/
+*.log

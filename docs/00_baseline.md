@@ -21,11 +21,6 @@ Duel Performance Logger (DPL) targets Windows 10/11 desktop environments, packag
 4. Install Windows 10 SDK command-line tools for signing and resource inspection.
 5. Configure `pyinstaller` path in `PATH` or invoke via module (`python -m PyInstaller`).
 
-## Fonts and Localization
-
-- Bundle `mgenplus-1p-regular.ttf` and `mgenplus-1p-bold.ttf` inside `resource/fonts/` for PDF/export flows.
-- Web UI loads fonts through CSS `@font-face` declarations defined in `resource/web/static/css/`.
-- Verify Japanese UI strings using Windows IME before release.
 
 ## Storage Layout
 
