@@ -23,6 +23,8 @@ from __future__ import annotations
 import csv
 import json
 import sqlite3
+import uuid
+from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,7 +54,7 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    CURRENT_SCHEMA_VERSION = "0.1.0"
+    CURRENT_SCHEMA_VERSION = "0.1.1"
     METADATA_DEFAULTS = {
         "schema_version": CURRENT_SCHEMA_VERSION,
         "ui_mode": "normal",
@@ -239,6 +241,15 @@ class DatabaseManager:
                     usage_count INTEGER NOT NULL DEFAULT 0
                 );
 
+                CREATE TABLE keywords (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    identifier TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT DEFAULT '',
+                    usage_count INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                );
+
                 CREATE TABLE matches (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     match_no INTEGER NOT NULL,
@@ -247,6 +258,8 @@ class DatabaseManager:
                     opponent_deck TEXT,
                     keywords TEXT,
                     result INTEGER NOT NULL CHECK (result IN (-1, 0, 1)),
+                    youtube_url TEXT DEFAULT '',
+                    favorite INTEGER NOT NULL DEFAULT 0,
                     -- 生成時刻は UTC のエポック秒
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
                 );
@@ -298,6 +311,7 @@ class DatabaseManager:
         current_version = self.get_schema_version()
         schema_changed = False
 
+        keyword_changed = False
         with self._connect() as connection:
             if self._table_exists(connection, "decks") and not self._column_exists(
                 connection, "decks", "usage_count"
@@ -324,8 +338,37 @@ class DatabaseManager:
                 )
                 schema_changed = True
 
+            if not self._table_exists(connection, "keywords"):
+                connection.execute(
+                    """
+                    CREATE TABLE keywords (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        identifier TEXT NOT NULL UNIQUE,
+                        name TEXT NOT NULL UNIQUE,
+                        description TEXT DEFAULT '',
+                        usage_count INTEGER NOT NULL DEFAULT 0,
+                        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                    )
+                    """
+                )
+                keyword_changed = True
+
+            if self._table_exists(connection, "matches"):
+                if not self._column_exists(connection, "matches", "youtube_url"):
+                    connection.execute(
+                        "ALTER TABLE matches ADD COLUMN youtube_url TEXT DEFAULT ''"
+                    )
+                    schema_changed = True
+                if not self._column_exists(connection, "matches", "favorite"):
+                    connection.execute(
+                        "ALTER TABLE matches ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0"
+                    )
+                    schema_changed = True
+
         if schema_changed:
             self.recalculate_usage_counts()
+        if keyword_changed:
+            self.recalculate_keyword_usage()
 
         if current_version != target_version:
             self.set_schema_version(target_version)
@@ -496,8 +539,8 @@ class DatabaseManager:
             指定された場合、そのデッキの対戦のみを返します。
         """
         query = (
-            "SELECT match_no, deck_name, turn, opponent_deck, keywords, result, created_at"
-            " FROM matches"
+            "SELECT id, match_no, deck_name, turn, opponent_deck, keywords, result, created_at, "
+            "youtube_url, favorite FROM matches"
         )
         params: Iterable[object] = ()
         if deck_name:
@@ -508,21 +551,37 @@ class DatabaseManager:
         query += " ORDER BY created_at ASC, id ASC"
 
         with self._connect() as connection:
+            keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
             cursor = connection.execute(query, tuple(params))
             records: list[dict[str, object]] = []
             for row in cursor.fetchall():
-                keywords_raw = row["keywords"]
-                keywords = json.loads(keywords_raw) if keywords_raw else []
+                raw_keywords = []
+                if row["keywords"]:
+                    try:
+                        raw_keywords = json.loads(row["keywords"])
+                    except json.JSONDecodeError:
+                        raw_keywords = []
+                keyword_ids = self._sanitize_keyword_ids_from_lookup(
+                    keyword_lookup, name_lookup, raw_keywords
+                )
+                keyword_details = self._keyword_details_from_lookup(
+                    keyword_lookup, keyword_ids
+                )
                 created_at = self._format_timestamp(row["created_at"])  # ISO 8601
                 records.append(
                     {
+                        "id": row["id"],
                         "match_no": row["match_no"],
                         "deck_name": row["deck_name"],
                         "turn": self._decode_turn(row["turn"]),
                         "opponent_deck": row["opponent_deck"] or "",
-                        "keywords": keywords,
+                        "keywords": [item["name"] for item in keyword_details],
+                        "keyword_ids": keyword_ids,
+                        "keyword_details": keyword_details,
                         "result": self._decode_result(row["result"]),
                         "created_at": created_at,
+                        "youtube_url": row["youtube_url"] or "",
+                        "favorite": bool(row["favorite"]),
                     }
                 )
             return records
@@ -530,8 +589,8 @@ class DatabaseManager:
     def fetch_last_match(self, deck_name: Optional[str] = None) -> Optional[dict[str, object]]:
         """最新の対戦ログを 1 件返却（デッキ名で絞り込み可能）。"""
         query = (
-            "SELECT match_no, deck_name, turn, opponent_deck, keywords, result, created_at"
-            " FROM matches"
+            "SELECT id, match_no, deck_name, turn, opponent_deck, keywords, result, created_at, "
+            "youtube_url, favorite FROM matches"
         )
         params: Iterable[object] = ()
         if deck_name:
@@ -542,22 +601,38 @@ class DatabaseManager:
         query += " ORDER BY created_at DESC, id DESC LIMIT 1"
 
         with self._connect() as connection:
+            keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
             cursor = connection.execute(query, tuple(params))
             row = cursor.fetchone()
             if row is None:
                 return None
 
-            keywords_raw = row["keywords"]
-            keywords = json.loads(keywords_raw) if keywords_raw else []
+            raw_keywords = []
+            if row["keywords"]:
+                try:
+                    raw_keywords = json.loads(row["keywords"])
+                except json.JSONDecodeError:
+                    raw_keywords = []
+            keyword_ids = self._sanitize_keyword_ids_from_lookup(
+                keyword_lookup, name_lookup, raw_keywords
+            )
+            keyword_details = self._keyword_details_from_lookup(
+                keyword_lookup, keyword_ids
+            )
             created_at = self._format_timestamp(row["created_at"])  # ISO 8601
             return {
+                "id": row["id"],
                 "match_no": row["match_no"],
                 "deck_name": row["deck_name"],
                 "turn": self._decode_turn(row["turn"]),
                 "opponent_deck": row["opponent_deck"] or "",
-                "keywords": keywords,
+                "keywords": [item["name"] for item in keyword_details],
+                "keyword_ids": keyword_ids,
+                "keyword_details": keyword_details,
                 "result": self._decode_result(row["result"]),
                 "created_at": created_at,
+                "youtube_url": row["youtube_url"] or "",
+                "favorite": bool(row["favorite"]),
             }
 
     def get_next_match_number(self, deck_name: Optional[str] = None) -> int:
@@ -632,9 +707,16 @@ class DatabaseManager:
 
         try:
             with self._connect() as connection:
-                cursor = connection.execute("DELETE FROM decks WHERE name = ?", (name,))
-                if cursor.rowcount == 0:
-                    raise DatabaseError(f"Deck '{name}' not found")
+                cursor = connection.execute(
+                    "SELECT usage_count FROM decks WHERE name = ?",
+                    (name,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise DatabaseError(f"デッキ「{name}」が見つかりません")
+                if int(row["usage_count"] or 0) > 0:
+                    raise DatabaseError("使用中のデッキは削除できません")
+                connection.execute("DELETE FROM decks WHERE name = ?", (name,))
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             log_error("Failed to delete deck", exc, name=name)
             raise DatabaseError("Failed to delete deck") from exc
@@ -658,9 +740,6 @@ class DatabaseManager:
         任意キー: ``opponent_deck``, ``keywords``（イテラブル可）
         ``keywords`` は JSON 文字列へシリアライズして保存します。
         """
-        keywords = record.get("keywords") or []
-        keywords_json = json.dumps(list(keywords), ensure_ascii=False)
-
         try:
             turn_value = self._encode_turn(record["turn"])
             result_value = self._encode_result(record["result"])
@@ -671,9 +750,22 @@ class DatabaseManager:
         if not deck_name:
             raise DatabaseError("デッキ名を指定してください")
         opponent_name = str(record.get("opponent_deck", "")).strip()
+        raw_keywords = record.get("keywords") or []
 
         try:
             with self._connect() as connection:
+                keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
+                filtered_keywords = [
+                    str(value or "").strip()
+                    for value in raw_keywords
+                    if str(value or "").strip()
+                ]
+                keyword_ids = self._sanitize_keyword_ids_from_lookup(
+                    keyword_lookup, name_lookup, raw_keywords
+                )
+                if filtered_keywords and not keyword_ids:
+                    raise DatabaseError("存在しないキーワードが含まれています")
+                keywords_json = json.dumps(keyword_ids, ensure_ascii=False)
                 connection.execute(
                     """
                     INSERT INTO matches (
@@ -708,6 +800,16 @@ class DatabaseManager:
                         """,
                         (opponent_name,),
                     )
+
+                for identifier in keyword_ids:
+                    connection.execute(
+                        """
+                        UPDATE keywords
+                        SET usage_count = usage_count + 1
+                        WHERE identifier = ?
+                        """,
+                        (identifier,),
+                    )
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             log_error("Failed to record match", exc, record=record)
             raise DatabaseError("Failed to record match") from exc
@@ -724,6 +826,30 @@ class DatabaseManager:
                 """
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    def fetch_keywords(self) -> list[dict[str, object]]:
+        """登録済みキーワード一覧を名称順で返却。"""
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                SELECT identifier, name, description, usage_count, created_at
+                FROM keywords
+                ORDER BY name COLLATE NOCASE
+                """
+            )
+            results: list[dict[str, object]] = []
+            for row in cursor.fetchall():
+                results.append(
+                    {
+                        "identifier": row["identifier"],
+                        "name": row["name"],
+                        "description": row["description"] or "",
+                        "usage_count": row["usage_count"],
+                        "created_at": self._format_timestamp(row["created_at"]),
+                    }
+                )
+            return results
 
     def add_opponent_deck(self, name: str) -> None:
         """対戦相手デッキ定義を追加。重複時は ``DuplicateEntryError``。"""
@@ -751,6 +877,321 @@ class DatabaseManager:
             log_error("Failed to insert opponent deck", exc, name=cleaned)
             raise DatabaseError("Failed to insert opponent deck") from exc
 
+    def delete_opponent_deck(self, name: str) -> None:
+        """対戦相手デッキ定義を削除。使用中は削除できない。"""
+
+        cleaned = name.strip()
+        if not cleaned:
+            raise DatabaseError("対戦相手デッキを指定してください")
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "SELECT usage_count FROM opponent_decks WHERE name = ?",
+                    (cleaned,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise DatabaseError(f"対戦相手デッキ「{cleaned}」が見つかりません")
+                if int(row["usage_count"] or 0) > 0:
+                    raise DatabaseError("使用中の対戦相手デッキは削除できません")
+                connection.execute(
+                    "DELETE FROM opponent_decks WHERE name = ?",
+                    (cleaned,),
+                )
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to delete opponent deck", exc, name=cleaned)
+            raise DatabaseError("Failed to delete opponent deck") from exc
+
+    def add_keyword(self, name: str, description: str = "") -> str:
+        """キーワードを追加し、生成された識別子を返却。"""
+
+        cleaned_name = name.strip()
+        if not cleaned_name:
+            raise DatabaseError("キーワード名を入力してください")
+        cleaned_description = (description or "").strip()
+
+        try:
+            with self._connect() as connection:
+                identifier = self._generate_keyword_identifier(connection)
+                connection.execute(
+                    """
+                    INSERT INTO keywords (identifier, name, description, usage_count)
+                    VALUES (?, ?, ?, 0)
+                    """,
+                    (identifier, cleaned_name, cleaned_description),
+                )
+                return identifier
+        except sqlite3.IntegrityError as exc:  # pragma: no cover - defensive
+            log_error("Duplicate keyword insertion attempted", exc, name=cleaned_name)
+            raise DuplicateEntryError(
+                f"キーワード「{cleaned_name}」は既に登録されています"
+            ) from exc
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to insert keyword", exc, name=cleaned_name)
+            raise DatabaseError("Failed to insert keyword") from exc
+
+    def delete_keyword(self, identifier: str) -> None:
+        """キーワードを削除。使用中は削除できない。"""
+
+        cleaned = (identifier or "").strip()
+        if not cleaned:
+            raise DatabaseError("削除するキーワードを指定してください")
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "SELECT usage_count FROM keywords WHERE identifier = ?",
+                    (cleaned,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise DatabaseError("指定したキーワードが見つかりません")
+                if int(row["usage_count"] or 0) > 0:
+                    raise DatabaseError("使用中のキーワードは削除できません")
+                connection.execute(
+                    "DELETE FROM keywords WHERE identifier = ?",
+                    (cleaned,),
+                )
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to delete keyword", exc, identifier=cleaned)
+            raise DatabaseError("Failed to delete keyword") from exc
+
+    def fetch_match(self, match_id: int) -> dict[str, object]:
+        """対戦ログ 1 件の詳細を取得する。"""
+
+        with self._connect() as connection:
+            keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
+            cursor = connection.execute(
+                """
+                SELECT id, match_no, deck_name, turn, opponent_deck, keywords,
+                       result, created_at, youtube_url, favorite
+                FROM matches
+                WHERE id = ?
+                """,
+                (match_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise DatabaseError("指定した対戦情報が見つかりません")
+
+            raw_keywords: list[object] = []
+            if row["keywords"]:
+                try:
+                    raw_keywords = json.loads(row["keywords"])
+                except json.JSONDecodeError:
+                    raw_keywords = []
+            keyword_ids = self._sanitize_keyword_ids_from_lookup(
+                keyword_lookup, name_lookup, raw_keywords
+            )
+            keyword_details = self._keyword_details_from_lookup(
+                keyword_lookup, keyword_ids
+            )
+
+            return {
+                "id": row["id"],
+                "match_no": row["match_no"],
+                "deck_name": row["deck_name"],
+                "turn": self._decode_turn(row["turn"]),
+                "opponent_deck": row["opponent_deck"] or "",
+                "result": self._decode_result(row["result"]),
+                "created_at": self._format_timestamp(row["created_at"]),
+                "youtube_url": row["youtube_url"] or "",
+                "favorite": bool(row["favorite"]),
+                "keywords": [item["name"] for item in keyword_details],
+                "keyword_ids": keyword_ids,
+                "keyword_details": keyword_details,
+            }
+
+    def update_match(self, match_id: int, updates: dict[str, object]) -> dict[str, object]:
+        """既存の対戦ログを更新し、更新後の詳細を返却する。"""
+
+        with self.transaction() as connection:
+            keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
+            cursor = connection.execute(
+                "SELECT * FROM matches WHERE id = ?",
+                (match_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise DatabaseError("指定した対戦情報が見つかりません")
+
+            old_deck = row["deck_name"]
+            new_deck = str(updates.get("deck_name", old_deck) or "").strip()
+            if not new_deck:
+                raise DatabaseError("デッキ名を指定してください")
+
+            deck_exists = connection.execute(
+                "SELECT 1 FROM decks WHERE name = ?",
+                (new_deck,),
+            ).fetchone()
+            if deck_exists is None:
+                raise DatabaseError(f"デッキ「{new_deck}」が見つかりません")
+
+            match_no_value = updates.get("match_no", row["match_no"])
+            try:
+                match_no = int(match_no_value)
+            except (TypeError, ValueError):
+                raise DatabaseError("対戦番号には数値を入力してください")
+            if match_no <= 0:
+                raise DatabaseError("対戦番号には 1 以上の値を指定してください")
+
+            turn_input = updates.get("turn", self._decode_turn(row["turn"]))
+            turn_value = self._encode_turn(turn_input)
+
+            result_input = updates.get("result", self._decode_result(row["result"]))
+            result_value = self._encode_result(result_input)
+
+            opponent_input = updates.get("opponent_deck", row["opponent_deck"] or "")
+            opponent_name = str(opponent_input or "").strip()
+
+            youtube_url = str(updates.get("youtube_url", row["youtube_url"] or "") or "").strip()
+            if len(youtube_url) > 2048:
+                raise DatabaseError("YouTube URL は 2048 文字以内で入力してください")
+
+            favorite_input = updates.get("favorite", bool(row["favorite"]))
+            if isinstance(favorite_input, str):
+                normalized_favorite = favorite_input.strip().lower()
+                favorite_flag = (
+                    1
+                    if normalized_favorite
+                    in {"1", "true", "yes", "on", "お気に入り", "favorite"}
+                    else 0
+                )
+            elif isinstance(favorite_input, (int, float)):
+                favorite_flag = 1 if int(favorite_input) != 0 else 0
+            else:
+                favorite_flag = 1 if bool(favorite_input) else 0
+
+            current_keywords_raw: list[object] = []
+            if row["keywords"]:
+                try:
+                    current_keywords_raw = json.loads(row["keywords"])
+                except json.JSONDecodeError:
+                    current_keywords_raw = []
+            old_keyword_ids = self._sanitize_keyword_ids_from_lookup(
+                keyword_lookup, name_lookup, current_keywords_raw
+            )
+
+            if "keywords" in updates:
+                new_keywords_input = updates.get("keywords") or []
+                filtered_new_keywords = [
+                    str(value or "").strip()
+                    for value in new_keywords_input
+                    if str(value or "").strip()
+                ]
+                new_keyword_ids = self._sanitize_keyword_ids_from_lookup(
+                    keyword_lookup, name_lookup, new_keywords_input
+                )
+                if filtered_new_keywords and not new_keyword_ids:
+                    raise DatabaseError("選択したキーワードが存在しません")
+            else:
+                new_keyword_ids = list(old_keyword_ids)
+
+            keywords_json = json.dumps(new_keyword_ids, ensure_ascii=False)
+
+            old_opponent = row["opponent_deck"] or ""
+
+            if opponent_name:
+                connection.execute(
+                    """
+                    INSERT INTO opponent_decks (name, usage_count)
+                    VALUES (?, 0)
+                    ON CONFLICT(name) DO NOTHING
+                    """,
+                    (opponent_name,),
+                )
+
+            connection.execute(
+                """
+                UPDATE matches
+                SET match_no = ?,
+                    deck_name = ?,
+                    turn = ?,
+                    opponent_deck = ?,
+                    keywords = ?,
+                    result = ?,
+                    youtube_url = ?,
+                    favorite = ?
+                WHERE id = ?
+                """,
+                (
+                    match_no,
+                    new_deck,
+                    turn_value,
+                    opponent_name if opponent_name else None,
+                    keywords_json,
+                    result_value,
+                    youtube_url,
+                    favorite_flag,
+                    match_id,
+                ),
+            )
+
+            if old_deck != new_deck:
+                connection.execute(
+                    """
+                    UPDATE decks
+                    SET usage_count = CASE
+                        WHEN usage_count > 0 THEN usage_count - 1
+                        ELSE 0
+                    END
+                    WHERE name = ?
+                    """,
+                    (old_deck,),
+                )
+                cursor = connection.execute(
+                    "UPDATE decks SET usage_count = usage_count + 1 WHERE name = ?",
+                    (new_deck,),
+                )
+                if cursor.rowcount == 0:
+                    raise DatabaseError(f"デッキ「{new_deck}」が見つかりません")
+
+            if old_opponent != opponent_name:
+                if old_opponent:
+                    connection.execute(
+                        """
+                        UPDATE opponent_decks
+                        SET usage_count = CASE
+                            WHEN usage_count > 0 THEN usage_count - 1
+                            ELSE 0
+                        END
+                        WHERE name = ?
+                        """,
+                        (old_opponent,),
+                    )
+                if opponent_name:
+                    connection.execute(
+                        "UPDATE opponent_decks SET usage_count = usage_count + 1 WHERE name = ?",
+                        (opponent_name,),
+                    )
+
+            old_keyword_set = set(old_keyword_ids)
+            new_keyword_set = set(new_keyword_ids)
+            removed_keywords = old_keyword_set - new_keyword_set
+            added_keywords = new_keyword_set - old_keyword_set
+
+            for identifier in removed_keywords:
+                connection.execute(
+                    """
+                    UPDATE keywords
+                    SET usage_count = CASE
+                        WHEN usage_count > 0 THEN usage_count - 1
+                        ELSE 0
+                    END
+                    WHERE identifier = ?
+                    """,
+                    (identifier,),
+                )
+
+            for identifier in added_keywords:
+                connection.execute(
+                    "UPDATE keywords SET usage_count = usage_count + 1 WHERE identifier = ?",
+                    (identifier,),
+                )
+
+        return self.fetch_match(match_id)
+
     def recalculate_usage_counts(self) -> None:
         """デッキと対戦相手デッキの使用回数を対戦ログから再計算する。"""
 
@@ -766,23 +1207,49 @@ class DatabaseManager:
                 """
             )
 
-            connection.execute("UPDATE opponent_decks SET usage_count = 0")
-            connection.execute(
-                """
-                INSERT INTO opponent_decks (name, usage_count)
-                SELECT name, usage_count
-                FROM (
-                    SELECT TRIM(opponent_deck) AS name, COUNT(*) AS usage_count
-                    FROM matches
-                    WHERE opponent_deck IS NOT NULL
-                      AND TRIM(opponent_deck) <> ''
-                    GROUP BY TRIM(opponent_deck)
+            cursor = connection.execute("SELECT name FROM opponent_decks")
+            for row in cursor.fetchall():
+                name = row["name"]
+                if not name:
+                    continue
+                count_row = connection.execute(
+                    "SELECT COUNT(*) FROM matches WHERE TRIM(opponent_deck) = TRIM(?)",
+                    (name,),
+                ).fetchone()
+                usage = int(count_row[0]) if count_row else 0
+                connection.execute(
+                    "UPDATE opponent_decks SET usage_count = ? WHERE name = ?",
+                    (usage, name),
                 )
-                WHERE name <> ''
-                ON CONFLICT(name)
-                DO UPDATE SET usage_count = excluded.usage_count
-                """
-            )
+
+    def recalculate_keyword_usage(self) -> None:
+        """キーワードの使用回数を対戦ログから再計算する。"""
+
+        with self._connect() as connection:
+            keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
+            if not keyword_lookup:
+                return
+
+            usage_counter: Counter[str] = Counter()
+            cursor = connection.execute("SELECT keywords FROM matches")
+            for row in cursor.fetchall():
+                if not row["keywords"]:
+                    continue
+                try:
+                    raw_keywords = json.loads(row["keywords"])
+                except json.JSONDecodeError:
+                    continue
+                keyword_ids = self._sanitize_keyword_ids_from_lookup(
+                    keyword_lookup, name_lookup, raw_keywords
+                )
+                usage_counter.update(keyword_ids)
+
+            connection.execute("UPDATE keywords SET usage_count = 0")
+            for identifier, count in usage_counter.items():
+                connection.execute(
+                    "UPDATE keywords SET usage_count = ? WHERE identifier = ?",
+                    (int(count), identifier),
+                )
 
     # ------------------------------------------------------------------
     # 高度なヘルパー
@@ -812,6 +1279,80 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     # 内部ユーティリティ
     # ------------------------------------------------------------------
+    def _build_keyword_lookups(
+        self, connection: sqlite3.Connection
+    ) -> tuple[dict[str, dict[str, object]], dict[str, str]]:
+        cursor = connection.execute(
+            "SELECT identifier, name, description, usage_count FROM keywords"
+        )
+        keyword_lookup: dict[str, dict[str, object]] = {}
+        name_lookup: dict[str, str] = {}
+        for row in cursor.fetchall():
+            identifier = row["identifier"]
+            name = row["name"]
+            info = {
+                "identifier": identifier,
+                "name": name,
+                "description": row["description"] or "",
+                "usage_count": row["usage_count"],
+            }
+            keyword_lookup[identifier] = info
+            name_lookup[name.strip().lower()] = identifier
+        return keyword_lookup, name_lookup
+
+    def _sanitize_keyword_ids_from_lookup(
+        self,
+        keyword_lookup: dict[str, dict[str, object]],
+        name_lookup: dict[str, str],
+        keywords: Iterable[object],
+    ) -> list[str]:
+        sanitized: list[str] = []
+        seen: set[str] = set()
+        for value in keywords or []:
+            candidate = str(value or "").strip()
+            if not candidate:
+                continue
+            identifier = None
+            lower = candidate.lower()
+            if candidate in keyword_lookup:
+                identifier = candidate
+            elif lower in name_lookup:
+                identifier = name_lookup[lower]
+            if identifier and identifier not in seen:
+                seen.add(identifier)
+                sanitized.append(identifier)
+        return sanitized
+
+    def _keyword_details_from_lookup(
+        self,
+        keyword_lookup: dict[str, dict[str, object]],
+        keyword_ids: Iterable[str],
+    ) -> list[dict[str, object]]:
+        details: list[dict[str, object]] = []
+        for identifier in keyword_ids:
+            info = keyword_lookup.get(identifier)
+            if not info:
+                continue
+            details.append(
+                {
+                    "identifier": info["identifier"],
+                    "name": info["name"],
+                    "description": info.get("description", ""),
+                    "usage_count": info.get("usage_count", 0),
+                }
+            )
+        return details
+
+    def _generate_keyword_identifier(self, connection: sqlite3.Connection) -> str:
+        while True:
+            identifier = f"kw-{uuid.uuid4().hex[:10]}"
+            cursor = connection.execute(
+                "SELECT 1 FROM keywords WHERE identifier = ?",
+                (identifier,),
+            )
+            if cursor.fetchone() is None:
+                return identifier
+
     @staticmethod
     def _format_timestamp(value: object) -> str:
         """SQLite に保存されたエポック秒（INTEGER）を ISO 8601 文字列へ変換。"""

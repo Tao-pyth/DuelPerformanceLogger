@@ -21,6 +21,7 @@ class AppState:
     seasons: list[dict[str, Any]] = field(default_factory=list)
     match_records: list[dict[str, Any]] = field(default_factory=list)
     opponent_decks: list[dict[str, Any]] = field(default_factory=list)
+    keywords: list[dict[str, Any]] = field(default_factory=list)
     current_match_settings: Optional[dict[str, Any]] = None
     current_match_count: int = 0
     migration_result: str = ""
@@ -36,6 +37,7 @@ class AppState:
             "seasons": self.seasons,
             "matches": self.match_records,
             "opponent_decks": self.opponent_decks,
+            "keywords": self.keywords,
             "current_match_settings": self.current_match_settings,
             "current_match_count": self.current_match_count,
             "migration_result": self.migration_result,
@@ -51,6 +53,7 @@ class AppState:
             seasons=[dict(item) for item in self.seasons],
             match_records=[dict(item) for item in self.match_records],
             opponent_decks=[dict(item) for item in self.opponent_decks],
+            keywords=[dict(item) for item in self.keywords],
             current_match_settings=(
                 dict(self.current_match_settings) if self.current_match_settings else None
             ),
@@ -100,6 +103,7 @@ def build_state(
         seasons=db.fetch_seasons(),
         match_records=db.fetch_matches(),
         opponent_decks=db.fetch_opponent_decks(),
+        keywords=db.fetch_keywords(),
         current_match_settings=None,
         current_match_count=0,
         migration_result=migration_result,

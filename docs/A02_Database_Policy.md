@@ -12,28 +12,29 @@ DPL が組み込む SQLite スキーマの維持、バックアップ、テス�
 ## <a id="schema-governance"></a>Schema Governance / スキーマ統制
 アプリとマイグレーションチェーンが整合するよう、バージョン管理の前提を定義します。
 
-- Track schema version via the `db_metadata.schema_version` column using semantic-version strings (e.g., `0.1.0`)。マイグレーションの順序性を担保します。
+- Track schema version via the `db_metadata.schema_version` column using semantic-version strings (e.g., `0.1.1`)。マイグレーションの順序性を担保します。
 - When schema changes occur, update `app/function/core/version.py::__version__` and extend the migration chain。アプリバージョンとスキーマを同期させます。
 - Keep migrations idempotent by relying on `IF NOT EXISTS` and additive `ALTER TABLE` statements。リプレイ可能な手順に限定します。
 
-## Schema Overview (v0.1.0) / スキーマ概要（v0.1.0）
-データベース初期構築およびマイグレーション後に保証されるテーブル構成を以下に示します。`schema_version="0.1.0"` は
-アプリのセマンティックバージョン `0.1.0` を保持します。
+## Schema Overview (v0.1.1) / スキーマ概要（v0.1.1）
+データベース初期構築およびマイグレーション後に保証されるテーブル構成を以下に示します。`schema_version="0.1.1"` は
+アプリのセマンティックバージョン `0.1.1` を保持します。
 
 | Table | 主用途 / Purpose | 主なカラム | 補足 | 初期値 |
 |-------|------------------|------------|------|--------|
 | `decks` | デッキ情報登録画面 | `name` (UNIQUE), `description` (TEXT), `usage_count` (INTEGER) | `usage_count` は登録済み対戦ログから再計算され、既定値は 0。| `usage_count=0` |
 | `opponent_decks` | 対戦相手デッキ情報登録画面 | `name` (UNIQUE), `usage_count` (INTEGER) | プルダウン表示用。対戦登録時に自動追加・加算。| `usage_count=0` |
-| `matches` | 対戦情報登録 | `match_no`, `deck_name`, `turn` (先攻=True/後攻=False), `opponent_deck`, `keywords` (JSON), `result` (-1/0/1), `created_at` (UTC epoch) | 直前に選択したデッキは `deck_name` と `match_no` で追跡。| `created_at=STRFTIME('%s','now')` |
+| `keywords` | 対戦キーワード管理 | `identifier` (UNIQUE), `name` (UNIQUE), `description` (TEXT), `usage_count` (INTEGER), `created_at` (UTC epoch) | `identifier` は内部用 UUID。`usage_count` は対戦データ登録時に集計。| `usage_count=0` |
+| `matches` | 対戦情報登録 | `match_no`, `deck_name`, `turn` (先攻=True/後攻=False), `opponent_deck`, `keywords` (JSON), `result` (-1/0/1), `youtube_url` (TEXT), `favorite` (INTEGER), `created_at` (UTC epoch) | `keywords` は JSON 配列。`youtube_url` は長めの URL (最大 2048 文字) を許容。`favorite` は 1/0 のフラグ。| `created_at=STRFTIME('%s','now')` |
 | `seasons` | シーズン管理（将来拡張） | `name`, `description`, `start_date`, `start_time`, `end_date`, `end_time` | 空でも動作。 | `description=''` |
-| `db_metadata` | 設定情報 | `schema_version`, `ui_mode`, `last_backup` | `ui_mode` は `normal` を既定値とし、マイグレーション完了後に `schema_version="0.1.0"` を記録。| `ui_mode='normal'` |
+| `db_metadata` | 設定情報 | `schema_version`, `ui_mode`, `last_backup` | `ui_mode` は `normal` を既定値とし、マイグレーション完了後に `schema_version="0.1.1"` を記録。| `ui_mode='normal'` |
 
 `DatabaseManager.ensure_database()` は起動時に以下を自動実施します。
 
 1. 必須テーブルとカラム（`decks.usage_count`、`opponent_decks.usage_count` など）の存在チェック。
 2. 欠落時の `ALTER TABLE` / `CREATE TABLE` 実行。
 3. `matches` を基準に `usage_count` を再計算し整合性を確保。
-4. メタデータへ最新スキーマバージョン (`"0.1.0"`) を保存。
+4. メタデータへ最新スキーマバージョン (`"0.1.1"`) を保存。
 
 
 ## <a id="backup-strategy"></a>Backup Strategy / バックアップ戦略

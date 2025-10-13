@@ -14,7 +14,8 @@
     "B10_Release_Management.md",
     "B11_Security_Standards.md",
     "B12_Test_Plan.md",
-    "B13_Update_Deployment.md"
+    "B13_Update_Deployment.md",
+    "CHANGELOG.md"
   ],
   "C": [
     "C20_Agent_Policies.md",
