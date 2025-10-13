@@ -107,16 +107,65 @@ class DuelPerformanceService:
             raise ValueError("対戦結果を選択してください")
 
         opponent = str(payload.get("opponent_deck", "")).strip()
+        raw_keywords = payload.get("keywords", [])
+        keywords: list[str] = []
+        if isinstance(raw_keywords, (list, tuple)):
+            for value in raw_keywords:
+                candidate = str(value or "").strip()
+                if candidate:
+                    keywords.append(candidate)
         match_record = {
             "match_no": self.db.get_next_match_number(deck_name),
             "deck_name": deck_name,
             "turn": bool(turn),
             "opponent_deck": opponent,
-            "keywords": payload.get("keywords", []),
+            "keywords": keywords,
             "result": int(result),
         }
 
         self.db.record_match(match_record)
+        return self.refresh_state()
+
+    def delete_deck(self, name: str) -> AppState:
+        cleaned = (name or "").strip()
+        if not cleaned:
+            raise ValueError("削除するデッキを選択してください")
+        self.db.delete_deck(cleaned)
+        return self.refresh_state()
+
+    def delete_opponent_deck(self, name: str) -> AppState:
+        cleaned = (name or "").strip()
+        if not cleaned:
+            raise ValueError("削除する対戦相手デッキを選択してください")
+        self.db.delete_opponent_deck(cleaned)
+        return self.refresh_state()
+
+    def register_keyword(self, name: str, description: str) -> AppState:
+        cleaned_name = (name or "").strip()
+        if not cleaned_name:
+            raise ValueError("キーワード名を入力してください")
+        cleaned_description = (description or "").strip()
+        self.db.add_keyword(cleaned_name, cleaned_description)
+        return self.refresh_state()
+
+    def delete_keyword(self, identifier: str) -> AppState:
+        cleaned = (identifier or "").strip()
+        if not cleaned:
+            raise ValueError("削除するキーワードを選択してください")
+        self.db.delete_keyword(cleaned)
+        return self.refresh_state()
+
+    def get_match_detail(self, match_id: int) -> dict[str, object]:
+        if match_id <= 0:
+            raise ValueError("対戦情報 ID が不正です")
+        return self.db.fetch_match(match_id)
+
+    def update_match(self, match_id: int, payload: dict[str, object]) -> AppState:
+        if match_id <= 0:
+            raise ValueError("対戦情報 ID が不正です")
+        updates = dict(payload or {})
+        updates.pop("id", None)
+        self.db.update_match(match_id, updates)
         return self.refresh_state()
 
     # ------------------------------------------------------------------
@@ -267,6 +316,71 @@ def prepare_match(payload: dict[str, Any]) -> dict[str, Any]:
 def register_match(payload: dict[str, Any]) -> dict[str, Any]:
     service = _ensure_service()
     return _operation_response(service, lambda: service.register_match(payload or {}))
+
+
+@eel.expose
+def delete_deck(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _ensure_service()
+    name = str(payload.get("name", "")) if payload else ""
+    return _operation_response(service, lambda: service.delete_deck(name))
+
+
+@eel.expose
+def delete_opponent_deck(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _ensure_service()
+    name = str(payload.get("name", "")) if payload else ""
+    return _operation_response(service, lambda: service.delete_opponent_deck(name))
+
+
+@eel.expose
+def register_keyword(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _ensure_service()
+    name = str(payload.get("name", "")) if payload else ""
+    description = str(payload.get("description", "")) if payload else ""
+    return _operation_response(
+        service, lambda: service.register_keyword(name, description)
+    )
+
+
+@eel.expose
+def delete_keyword(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _ensure_service()
+    identifier = str(payload.get("identifier", "")) if payload else ""
+    return _operation_response(service, lambda: service.delete_keyword(identifier))
+
+
+@eel.expose
+def get_match_detail(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _ensure_service()
+    match_id_raw = payload.get("id") if payload else None
+    try:
+        match_id = int(match_id_raw)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "対戦情報 ID が不正です"}
+
+    try:
+        detail = service.get_match_detail(match_id)
+    except (DatabaseError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    else:
+        return {"ok": True, "data": detail}
+
+
+@eel.expose
+def update_match(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _ensure_service()
+    if not payload:
+        return {"ok": False, "error": "更新内容が指定されていません"}
+
+    match_id_raw = payload.get("id")
+    try:
+        match_id = int(match_id_raw)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "対戦情報 ID が不正です"}
+
+    updates = dict(payload)
+    updates.pop("id", None)
+    return _operation_response(service, lambda: service.update_match(match_id, updates))
 
 
 def main() -> None:

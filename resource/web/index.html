@@ -76,6 +76,15 @@
               <button type="button" class="nav-button" data-nav-target="match-start">
                 対戦情報の登録を開始
               </button>
+              <button type="button" class="nav-button" data-nav-target="keyword-management">
+                対戦キーワードを管理
+              </button>
+              <button type="button" class="nav-button" data-nav-target="match-list">
+                対戦情報を一覧で確認
+              </button>
+              <button type="button" class="nav-button" data-nav-target="match-stats">
+                対戦統計を見る
+              </button>
               <button type="button" class="nav-button" data-nav-target="settings">
                 設定
               </button>
@@ -137,11 +146,12 @@
                   <th scope="col">デッキ名</th>
                   <th scope="col">説明</th>
                   <th scope="col">使用回数</th>
+                  <th scope="col">操作</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td colspan="3" class="data-table__empty">まだデータがありません。</td>
+                  <td colspan="4" class="data-table__empty">まだデータがありません。</td>
                 </tr>
               </tbody>
             </table>
@@ -177,11 +187,58 @@
                 <tr>
                   <th scope="col">デッキ名</th>
                   <th scope="col">使用回数</th>
+                  <th scope="col">操作</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td colspan="2" class="data-table__empty">まだデータがありません。</td>
+                  <td colspan="3" class="data-table__empty">まだデータがありません。</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-view="keyword-management" hidden>
+        <div class="view__content stack">
+          <section class="panel" aria-labelledby="keyword-registration-title">
+            <h2 id="keyword-registration-title">対戦キーワード登録</h2>
+            <form id="keyword-form" class="form-grid">
+              <label class="form-field">
+                <span>キーワード名</span>
+                <input type="text" id="keyword-name" name="name" required maxlength="120" />
+              </label>
+              <label class="form-field">
+                <span>説明</span>
+                <textarea
+                  id="keyword-description"
+                  name="description"
+                  rows="3"
+                  maxlength="400"
+                ></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit" class="primary-button">登録する</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel" aria-labelledby="keyword-list-title">
+            <h3 id="keyword-list-title">登録済みキーワード</h3>
+            <table class="data-table" id="keyword-table">
+              <thead>
+                <tr>
+                  <th scope="col">キーワード名</th>
+                  <th scope="col">内部ID</th>
+                  <th scope="col">説明</th>
+                  <th scope="col">使用回数</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="5" class="data-table__empty">まだデータがありません。</td>
                 </tr>
               </tbody>
             </table>
@@ -264,6 +321,14 @@
                   </select>
                 </label>
 
+                <label class="match-entry-select">
+                  <span class="match-entry-select__label">対戦キーワード</span>
+                  <select id="match-keywords" name="keywords" multiple size="4">
+                    <option value="" disabled>キーワードを選択...</option>
+                  </select>
+                  <small class="match-entry-hint">Ctrl / Cmd キーで複数選択できます</small>
+                </label>
+
                 <fieldset class="match-entry-fieldset">
                   <legend>勝敗</legend>
                   <div class="match-entry-options">
@@ -287,6 +352,160 @@
                 <button type="submit" class="primary-button">対戦情報を登録</button>
               </div>
             </form>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-view="match-list" hidden>
+        <div class="view__content stack">
+          <section class="panel" aria-labelledby="match-list-title">
+            <h2 id="match-list-title">対戦情報一覧</h2>
+            <table class="data-table" id="match-list-table">
+              <thead>
+                <tr>
+                  <th scope="col">記録時刻</th>
+                  <th scope="col">使用デッキ</th>
+                  <th scope="col">#</th>
+                  <th scope="col">勝敗</th>
+                  <th scope="col">詳細</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="5" class="data-table__empty">まだデータがありません。</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-view="match-detail" hidden>
+        <div class="view__content stack">
+          <section class="panel match-detail-panel" aria-labelledby="match-detail-title">
+            <div class="panel__header match-detail-header">
+              <h2 id="match-detail-title">対戦情報詳細</h2>
+              <button type="button" class="primary-button" id="match-detail-edit">
+                編集する
+              </button>
+            </div>
+            <dl class="match-detail-grid">
+              <div>
+                <dt>記録時刻</dt>
+                <dd id="match-detail-timestamp">-</dd>
+              </div>
+              <div>
+                <dt>使用デッキ</dt>
+                <dd id="match-detail-deck">-</dd>
+              </div>
+              <div>
+                <dt>対戦番号</dt>
+                <dd id="match-detail-number">-</dd>
+              </div>
+              <div>
+                <dt>勝敗</dt>
+                <dd id="match-detail-result">-</dd>
+              </div>
+              <div>
+                <dt>先攻 / 後攻</dt>
+                <dd id="match-detail-turn">-</dd>
+              </div>
+              <div>
+                <dt>対戦相手デッキ</dt>
+                <dd id="match-detail-opponent">-</dd>
+              </div>
+              <div>
+                <dt>キーワード</dt>
+                <dd id="match-detail-keywords" class="match-detail-keywords">-</dd>
+              </div>
+              <div>
+                <dt>YouTube URL</dt>
+                <dd id="match-detail-youtube">-</dd>
+              </div>
+              <div>
+                <dt>お気に入り</dt>
+                <dd id="match-detail-favorite">-</dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-view="match-edit" hidden>
+        <div class="view__content stack">
+          <section class="panel" aria-labelledby="match-edit-title">
+            <div class="panel__header match-detail-header">
+              <h2 id="match-edit-title">対戦情報を編集</h2>
+            </div>
+            <form id="match-edit-form" class="form-grid match-edit-form">
+              <label class="form-field">
+                <span>使用デッキ</span>
+                <select id="match-edit-deck" name="deck_name" required></select>
+              </label>
+              <label class="form-field">
+                <span>対戦番号</span>
+                <input type="number" id="match-edit-number" name="match_no" min="1" required />
+              </label>
+              <fieldset class="match-entry-fieldset">
+                <legend>先攻 / 後攻</legend>
+                <div class="match-entry-options">
+                  <label class="match-entry-option">
+                    <input type="radio" name="turn" value="first" required />
+                    <span class="match-entry-option__label">先攻</span>
+                  </label>
+                  <label class="match-entry-option">
+                    <input type="radio" name="turn" value="second" required />
+                    <span class="match-entry-option__label">後攻</span>
+                  </label>
+                </div>
+              </fieldset>
+              <label class="form-field">
+                <span>対戦相手デッキ</span>
+                <select id="match-edit-opponent" name="opponent_deck" required></select>
+              </label>
+              <label class="form-field">
+                <span>対戦キーワード</span>
+                <select id="match-edit-keywords" name="keywords" multiple size="6"></select>
+              </label>
+              <fieldset class="match-entry-fieldset">
+                <legend>勝敗</legend>
+                <div class="match-entry-options">
+                  <label class="match-entry-option">
+                    <input type="radio" name="result" value="1" required />
+                    <span class="match-entry-option__label">勝ち</span>
+                  </label>
+                  <label class="match-entry-option">
+                    <input type="radio" name="result" value="-1" required />
+                    <span class="match-entry-option__label">負け</span>
+                  </label>
+                  <label class="match-entry-option">
+                    <input type="radio" name="result" value="0" required />
+                    <span class="match-entry-option__label">引き分け</span>
+                  </label>
+                </div>
+              </fieldset>
+              <label class="form-field">
+                <span>対戦ログ YouTube URL</span>
+                <input type="url" id="match-edit-youtube" name="youtube_url" placeholder="https://www.youtube.com/..." />
+              </label>
+              <label class="form-field form-field--inline">
+                <span>お気に入り</span>
+                <input type="checkbox" id="match-edit-favorite" name="favorite" />
+              </label>
+              <div class="form-actions">
+                <button type="submit" class="primary-button">保存する</button>
+                <button type="button" class="secondary-button" data-nav="back">キャンセル</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-view="match-stats" hidden>
+        <div class="view__content stack">
+          <section class="panel" aria-labelledby="match-stats-title">
+            <h2 id="match-stats-title">対戦統計</h2>
+            <p class="panel__body panel__body--muted">本機能は作成中</p>
           </section>
         </div>
       </section>
