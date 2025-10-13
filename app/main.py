@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import eel
+
+try:  # pragma: no cover - fallback for environments without tzdata
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except Exception:  # pragma: no cover - Python < 3.9 or stripped zoneinfo
+    ZoneInfo = None  # type: ignore[assignment]
+    ZoneInfoNotFoundError = Exception  # type: ignore[assignment]
 
 from app.function import (
     AppState,
@@ -85,12 +92,7 @@ class DuelPerformanceService:
         if not deck:
             raise ValueError("デッキを選択してください")
         next_match = self.db.get_next_match_number(deck)
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-
-        timestamp = (
-            datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%H:%M:%S（%Y/%m/%d）")
-        )
+        timestamp = _format_timestamp()
         return {
             "deck_name": deck,
             "next_match_no": next_match,
@@ -197,6 +199,29 @@ def _ensure_service() -> DuelPerformanceService:
         service.bootstrap()
         _SERVICE = service
     return _SERVICE
+
+
+def _format_timestamp() -> str:
+    """Return the current timestamp formatted for the UI.
+
+    The default implementation uses the system tzdata when available.  Some
+    Windows Python installations omit the ``tzdata`` package which causes
+    ``ZoneInfo`` to raise ``ZoneInfoNotFoundError``.  In that situation we fall
+    back to a fixed UTC+9 offset so the application can still display the
+    timestamp.
+    """
+
+    tz = None
+    if ZoneInfo is not None:
+        try:
+            tz = ZoneInfo("Asia/Tokyo")
+        except ZoneInfoNotFoundError:  # pragma: no cover - requires missing tzdata
+            tz = None
+
+    if tz is None:
+        tz = timezone(timedelta(hours=9))
+
+    return datetime.now(tz).strftime("%H:%M:%S（%Y/%m/%d）")
 
 
 def _build_snapshot(state: Optional[AppState] = None) -> dict[str, Any]:
