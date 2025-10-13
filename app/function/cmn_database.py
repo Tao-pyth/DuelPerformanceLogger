@@ -52,9 +52,9 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    CURRENT_SCHEMA_VERSION = 4
+    CURRENT_SCHEMA_VERSION = "0.1.0"
     METADATA_DEFAULTS = {
-        "schema_version": str(CURRENT_SCHEMA_VERSION),
+        "schema_version": CURRENT_SCHEMA_VERSION,
         "ui_mode": "normal",
         "last_backup": "",
     }
@@ -118,24 +118,72 @@ class DatabaseManager:
 
         if needs_initialization:
             self.initialize_database()
+
         self.ensure_metadata_defaults()
+        self._migrate_schema()
 
     # ------------------------------------------------------------------
     # バージョン管理
     # ------------------------------------------------------------------
-    def get_schema_version(self) -> int:
+    @staticmethod
+    def _int_to_semver(value: int) -> str:
+        safe_value = max(int(value), 0)
+        major = safe_value // 10000
+        minor = (safe_value // 100) % 100
+        patch = safe_value % 100
+        return f"{major}.{minor}.{patch}"
+
+    @staticmethod
+    def _is_semver(candidate: str) -> bool:
+        parts = candidate.split(".")
+        if len(parts) != 3:
+            return False
+        for part in parts:
+            if not part.isdigit():
+                return False
+            if not (0 <= int(part) <= 99):
+                return False
+        return True
+
+    @classmethod
+    def normalize_schema_version(cls, value: str | int | None, fallback: str | None = None) -> str:
+        if fallback is None:
+            fallback = "0.0.0"
+
+        if isinstance(value, int):
+            return cls._int_to_semver(value)
+
+        if isinstance(value, str):
+            candidate = value.strip()
+        elif value is None:
+            candidate = ""
+        else:
+            candidate = str(value).strip()
+
+        if candidate:
+            if cls._is_semver(candidate):
+                return candidate
+            if candidate.isdigit():
+                try:
+                    return cls._int_to_semver(int(candidate))
+                except ValueError:  # pragma: no cover - defensive
+                    pass
+
+        return fallback
+
+    def get_schema_version(self) -> str:
         """保存されているスキーマバージョンを取得する。"""
 
         value = self.get_metadata("schema_version")
-        try:
-            return int(value) if value is not None else 0
-        except ValueError:  # pragma: no cover - defensive
-            return 0
+        return self.normalize_schema_version(value)
 
-    def set_schema_version(self, version: int) -> None:
+    def set_schema_version(self, version: str | int) -> None:
         """スキーマバージョンを更新する。"""
 
-        self.set_metadata("schema_version", str(int(version)))
+        normalized = self.normalize_schema_version(
+            version, fallback=self.CURRENT_SCHEMA_VERSION
+        )
+        self.set_metadata("schema_version", normalized)
 
     def initialize_database(self) -> None:
         """DB を初期化（既存ファイルを残したままスキーマを再構築）。
@@ -215,7 +263,7 @@ class DatabaseManager:
 
             cursor.execute(
                 "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
-                ("schema_version", str(self.CURRENT_SCHEMA_VERSION)),
+                ("schema_version", self.CURRENT_SCHEMA_VERSION),
             )
             cursor.execute(
                 "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
@@ -242,6 +290,45 @@ class DatabaseManager:
                         "INSERT INTO db_metadata (key, value) VALUES (?, ?)",
                         (key, value),
                     )
+
+    def _migrate_schema(self) -> None:
+        """スキーマの不足分を補完し、バージョン番号の整合性を保つ。"""
+
+        target_version = self.CURRENT_SCHEMA_VERSION
+        current_version = self.get_schema_version()
+        schema_changed = False
+
+        with self._connect() as connection:
+            if self._table_exists(connection, "decks") and not self._column_exists(
+                connection, "decks", "usage_count"
+            ):
+                connection.execute(
+                    "ALTER TABLE decks ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0"
+                )
+                schema_changed = True
+
+            if not self._table_exists(connection, "opponent_decks"):
+                connection.execute(
+                    """
+                    CREATE TABLE opponent_decks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL UNIQUE,
+                        usage_count INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                schema_changed = True
+            elif not self._column_exists(connection, "opponent_decks", "usage_count"):
+                connection.execute(
+                    "ALTER TABLE opponent_decks ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0"
+                )
+                schema_changed = True
+
+        if schema_changed:
+            self.recalculate_usage_counts()
+
+        if current_version != target_version:
+            self.set_schema_version(target_version)
 
     def get_metadata(self, key: str, default: str | None = None) -> str | None:
         """Retrieve a metadata value or return *default* when absent."""
@@ -733,6 +820,28 @@ class DatabaseManager:
         except (TypeError, ValueError):
             return ""
         return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+    @staticmethod
+    def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
+        cursor = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        )
+        return cursor.fetchone() is not None
+
+    @staticmethod
+    def _column_exists(
+        connection: sqlite3.Connection, table_name: str, column_name: str
+    ) -> bool:
+        try:
+            cursor = connection.execute(f"PRAGMA table_info({table_name})")
+        except sqlite3.DatabaseError:
+            return False
+        for row in cursor.fetchall():
+            # `PRAGMA table_info` returns tuples like (cid, name, type, notnull, dflt_value, pk)
+            if len(row) > 1 and row[1] == column_name:
+                return True
+        return False
 
     @staticmethod
     def _encode_turn(value: object) -> int:
