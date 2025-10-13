@@ -220,10 +220,18 @@
       </section>
 
       <section class="view" data-view="match-entry" hidden>
-        <div class="view__content stack">
-          <section class="panel" aria-labelledby="match-entry-title">
-            <h2 id="match-entry-title">対戦情報登録</h2>
-            <dl class="info-list">
+        <div class="view__content stack match-entry-layout">
+          <section class="panel match-entry-panel" aria-labelledby="match-entry-title">
+            <div class="match-entry-header">
+              <h2 id="match-entry-title">対戦情報登録</h2>
+              <div class="match-entry-clock" aria-live="polite">
+                <span class="match-entry-clock__label">現在時刻</span>
+                <time id="match-entry-clock" class="match-entry-clock__time" datetime=""
+                  >--:--:--</time
+                >
+              </div>
+            </div>
+            <dl class="info-list match-entry-info">
               <div>
                 <dt>使用デッキ</dt>
                 <dd id="match-entry-deck-name">-</dd>
@@ -232,52 +240,50 @@
                 <dt>次の対戦番号</dt>
                 <dd id="match-entry-number">-</dd>
               </div>
-              <div>
-                <dt>記録時刻</dt>
-                <dd id="match-entry-timestamp">-</dd>
-              </div>
             </dl>
-            <form id="match-entry-form" class="form-grid">
-              <fieldset class="form-field">
-                <legend>先攻 / 後攻</legend>
-                <div class="option-row">
-                  <label>
-                    <input type="radio" name="turn" value="first" required />
-                    先攻
-                  </label>
-                  <label>
-                    <input type="radio" name="turn" value="second" required />
-                    後攻
-                  </label>
-                </div>
-              </fieldset>
+            <form id="match-entry-form" class="match-entry-form">
+              <div class="match-entry-inline">
+                <fieldset class="match-entry-fieldset">
+                  <legend>先攻 / 後攻</legend>
+                  <div class="option-row">
+                    <label>
+                      <input type="radio" name="turn" value="first" required />
+                      先攻
+                    </label>
+                    <label>
+                      <input type="radio" name="turn" value="second" required />
+                      後攻
+                    </label>
+                  </div>
+                </fieldset>
 
-              <label class="form-field">
-                <span>対戦相手デッキ</span>
-                <select id="match-opponent" name="opponent_deck" required>
-                  <option value="" selected>対戦相手デッキを選択...</option>
-                </select>
-              </label>
+                <label class="match-entry-select">
+                  <span>対戦相手デッキ</span>
+                  <select id="match-opponent" name="opponent_deck" required>
+                    <option value="" selected>対戦相手デッキを選択...</option>
+                  </select>
+                </label>
 
-              <fieldset class="form-field">
-                <legend>勝敗</legend>
-                <div class="option-row">
-                  <label>
-                    <input type="radio" name="result" value="1" required />
-                    勝ち
-                  </label>
-                  <label>
-                    <input type="radio" name="result" value="-1" required />
-                    負け
-                  </label>
-                  <label>
-                    <input type="radio" name="result" value="0" required />
-                    引き分け
-                  </label>
-                </div>
-              </fieldset>
+                <fieldset class="match-entry-fieldset">
+                  <legend>勝敗</legend>
+                  <div class="option-row">
+                    <label>
+                      <input type="radio" name="result" value="1" required />
+                      勝ち
+                    </label>
+                    <label>
+                      <input type="radio" name="result" value="-1" required />
+                      負け
+                    </label>
+                    <label>
+                      <input type="radio" name="result" value="0" required />
+                      引き分け
+                    </label>
+                  </div>
+                </fieldset>
+              </div>
 
-              <div class="form-actions">
+              <div class="match-entry-actions">
                 <button type="submit" class="primary-button">対戦情報を登録</button>
               </div>
             </form>

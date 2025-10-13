@@ -199,6 +199,139 @@ legend {
   font-size: 1.05rem;
 }
 
+.match-entry-layout {
+  align-items: stretch;
+}
+
+.match-entry-panel {
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+.match-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.match-entry-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  gap: 6px;
+}
+
+.match-entry-clock__label {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.match-entry-clock__time {
+  font-size: clamp(2.4rem, 6vw, 3.6rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.match-entry-info {
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+}
+
+.match-entry-form {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.match-entry-inline {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.match-entry-fieldset {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(15, 17, 26, 0.45);
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.match-entry-fieldset legend {
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+}
+
+.match-entry-fieldset .option-row {
+  justify-content: space-between;
+}
+
+.match-entry-select {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(15, 17, 26, 0.45);
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.match-entry-select span {
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.match-entry-select select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(15, 17, 26, 0.6);
+  color: var(--foreground);
+  font-size: 1rem;
+}
+
+.match-entry-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 960px) {
+  .match-entry-panel {
+    height: auto;
+  }
+
+  .match-entry-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .match-entry-clock {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .match-entry-inline {
+    grid-template-columns: 1fr;
+  }
+}
+
 .panel {
   background: var(--panel-bg);
   border-radius: 18px;
