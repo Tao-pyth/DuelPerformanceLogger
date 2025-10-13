@@ -126,16 +126,15 @@ class DuelPerformanceService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _expected_schema_version(self) -> int:
+    def _expected_schema_version(self) -> str:
         expected_version_raw = self.config.get("database", {}).get(
             "expected_version", DatabaseManager.CURRENT_SCHEMA_VERSION
         )
-        try:
-            return int(expected_version_raw)
-        except (TypeError, ValueError):
-            return DatabaseManager.CURRENT_SCHEMA_VERSION
+        return DatabaseManager.normalize_schema_version(
+            expected_version_raw, fallback=DatabaseManager.CURRENT_SCHEMA_VERSION
+        )
 
-    def _handle_version_mismatch(self, current_version: int, expected_version: int) -> str:
+    def _handle_version_mismatch(self, current_version: str, expected_version: str) -> str:
         """Run backup and restore flow when the schema version differs."""
 
         lines = [
