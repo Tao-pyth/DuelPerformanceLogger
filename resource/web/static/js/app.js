@@ -17,7 +17,7 @@ const matchStartForm = document.getElementById("match-start-form");
 const matchEntryForm = document.getElementById("match-entry-form");
 const matchEntryDeckNameEl = document.getElementById("match-entry-deck-name");
 const matchEntryNumberEl = document.getElementById("match-entry-number");
-const matchEntryTimestampEl = document.getElementById("match-entry-timestamp");
+const matchEntryClockEl = document.getElementById("match-entry-clock");
 const settingsUiModeEl = document.getElementById("settings-ui-mode");
 const settingsMigrationEl = document.getElementById("settings-migration");
 
@@ -43,8 +43,32 @@ let latestSnapshot = null;
 const matchEntryState = {
   deckName: "",
   matchNumber: null,
-  timestamp: "",
 };
+
+let matchEntryClockTimer = null;
+
+function updateMatchEntryClock() {
+  if (!matchEntryClockEl) {
+    return;
+  }
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  const seconds = String(now.getSeconds()).padStart(2, "0");
+  matchEntryClockEl.textContent = `${hours}:${minutes}:${seconds}`;
+  matchEntryClockEl.setAttribute("datetime", now.toISOString());
+}
+
+function initialiseMatchEntryClock() {
+  if (!matchEntryClockEl) {
+    return;
+  }
+  updateMatchEntryClock();
+  if (matchEntryClockTimer !== null) {
+    return;
+  }
+  matchEntryClockTimer = window.setInterval(updateMatchEntryClock, 1000);
+}
 
 function setActiveView(id) {
   if (!id || currentView === id) {
@@ -300,7 +324,6 @@ function updateMatchEntryView() {
   matchEntryDeckNameEl.textContent = matchEntryState.deckName || "-";
   matchEntryNumberEl.textContent =
     matchEntryState.matchNumber !== null ? matchEntryState.matchNumber : "-";
-  matchEntryTimestampEl.textContent = matchEntryState.timestamp || "-";
   matchEntryForm.reset();
   populateOpponentOptions(latestSnapshot?.opponent_decks ?? [], "");
 }
@@ -399,7 +422,6 @@ async function beginMatchEntry(deckName, { pushHistory = true } = {}) {
 
     matchEntryState.deckName = response.data.deck_name;
     matchEntryState.matchNumber = response.data.next_match_no;
-    matchEntryState.timestamp = response.data.timestamp;
     updateMatchEntryView();
 
     if (pushHistory) {
@@ -514,5 +536,6 @@ refreshButton.addEventListener("click", () => fetchSnapshot({ silent: false }));
 registerNavigationHandlers();
 
 window.addEventListener("DOMContentLoaded", () => {
+  initialiseMatchEntryClock();
   fetchSnapshot({ silent: true });
 });
