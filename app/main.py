@@ -54,8 +54,20 @@ class DuelPerformanceService:
     # Lifecycle helpers
     # ------------------------------------------------------------------
     def bootstrap(self) -> AppState:
-        """Ensure the database is ready and return the initial state."""
+        """
+        Ensure the database is ready and return the initial state.
 
+        強制プリフライト（ensure_database）を起動直前に再実行し、
+        必ずマイグレーション完了後に refresh_state() へ進む。
+        """
+        # --- A) 強制プリフライト（冪等） ---
+        try:
+            self.db.ensure_database()  # ※ __init__ 側で実行済みでも冪等
+        except (sqlite3.DatabaseError, DatabaseError) as exc:
+            # 既存の復旧ルートに委譲（バックアップ→再構築→復元 等）
+            self.migration_result = self._handle_startup_migration_failure(exc)
+
+        # --- バージョン整合性チェック（既存ハンドラ利用） ---
         expected_version = self._expected_schema_version()
         current_version = self.db.get_schema_version()
         if current_version != expected_version:
@@ -63,14 +75,16 @@ class DuelPerformanceService:
                 current_version, expected_version
             )
         else:
-            self.migration_result = (
-                self.db.get_metadata("last_migration_message", "") or ""
-            )
+            # 直近マイグレーションの説明を拾っておく（存在すれば）
+            self.migration_result = self.db.get_metadata("last_migration_message", "") or ""
 
+        # 期待 version を記録（観測/診断用途。実スキーマは ensure_database/_migrate_schema により整合）
         self.db.set_schema_version(expected_version)
         self.migration_timestamp = (
             self.db.get_metadata("last_migration_message_at", "") or ""
         )
+
+        # --- 起動後の AppState 構築 ---
         return self.refresh_state()
 
     def refresh_state(self) -> AppState:

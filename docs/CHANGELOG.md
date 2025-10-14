@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. Version numbers follow `DPL.<MAJOR>.<MINOR>.<PATCH>`.
 
+## [0.2.1] - 2025-10-14
+### Changed
+- EN: Enforced a database preflight during service bootstrap so migrations finish before the initial state is built.
+- JP: サービス起動時にプリフライトを必ず実行し、初期状態構築前にマイグレーション完了を保証するようにしました。
+
+### Fixed
+- EN: Added a self-healing retry when fetching matches detects a missing table by running migrations and reissuing the query once.
+- JP: matches テーブル欠如を検知した際にマイグレーションを行い 1 回だけ再実行する自己修復リトライを追加しました。
+
 ## [0.2.0] - 2025-10-13
 ### Added
 - EN: Introduced season management across the database, API, and UI including a dedicated registration view and season selection during match entry.

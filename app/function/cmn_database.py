@@ -57,7 +57,7 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    CURRENT_SCHEMA_VERSION = "0.2.0"
+    CURRENT_SCHEMA_VERSION = "0.2.1"
     METADATA_DEFAULTS = {
         "schema_version": CURRENT_SCHEMA_VERSION,
         "ui_mode": "normal",
@@ -690,43 +690,56 @@ class DatabaseManager:
             return results
 
     def fetch_matches(self, deck_name: Optional[str] = None) -> list[dict[str, object]]:
-        """対戦ログを返却します。
-
-        Parameters
-        ----------
-        deck_name: Optional[str]
-            指定された場合、その名称を持つデッキの対戦のみを返します。
-            未登録の名称が渡された場合は空配列を返却します。
+        """
+        matches テーブル参照。
+        起動順序/既存DB差異により matches が未作成だった場合、
+        1) マイグレーションで自己修復し、2) 同クエリを 1 回のみ再試行する。
         """
 
-        with self._connect() as connection:
-            keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
-            params: tuple[object, ...] = ()
-            query = (
-                "SELECT "
-                "m.id, m.match_no, m.deck_id, d.name AS deck_name, "
-                "m.season_id, s.name AS season_name, m.turn, "
-                "m.opponent_deck, m.keywords, m.result, m.created_at, "
-                "m.youtube_url, m.favorite "
-                "FROM matches AS m "
-                "JOIN decks AS d ON d.id = m.deck_id "
-                "LEFT JOIN seasons AS s ON s.id = m.season_id"
-            )
+        def _run_query() -> list[dict[str, object]]:
+            with self._connect() as connection:
+                keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
 
-            if deck_name:
-                deck_id = self._find_deck_id(connection, deck_name)
-                if deck_id is None:
-                    return []
-                query += " WHERE m.deck_id = ?"
-                params = (deck_id,)
+                params: tuple[object, ...] = ()
+                query = (
+                    "SELECT "
+                    "m.id, m.match_no, m.deck_id, d.name AS deck_name, "
+                    "m.season_id, s.name AS season_name, m.turn, "
+                    "m.opponent_deck, m.keywords, m.result, m.created_at, "
+                    "m.youtube_url, m.favorite "
+                    "FROM matches AS m "
+                    "JOIN decks AS d ON d.id = m.deck_id "
+                    "LEFT JOIN seasons AS s ON s.id = m.season_id"
+                )
 
-            query += " ORDER BY m.created_at ASC, m.id ASC"
+                if deck_name:
+                    deck_id = self._find_deck_id(connection, deck_name)
+                    if deck_id is None:
+                        return []
+                    query += " WHERE m.deck_id = ?"
+                    params = (deck_id,)
 
-            cursor = connection.execute(query, params)
-            return [
-                self._hydrate_match_row(row, keyword_lookup, name_lookup)
-                for row in cursor.fetchall()
-            ]
+                query += " ORDER BY m.created_at ASC, m.id ASC"
+
+                cursor = connection.execute(query, params)
+                rows = cursor.fetchall()
+                return [
+                    self._hydrate_match_row(row, keyword_lookup, name_lookup)
+                    for row in rows
+                ]
+
+        try:
+            return _run_query()
+        except sqlite3.OperationalError as exc:
+            # "no such table: matches" が原因のときだけ、自己修復して 1 回再試行
+            msg = str(exc).lower()
+            if "no such table" in msg and "matches" in msg:
+                # 不足スキーマ補完（冪等）
+                self._migrate_schema()
+                # 再試行（1回だけ）
+                return _run_query()
+            # 別要因は投げ直し
+            raise
 
     def fetch_last_match(self, deck_name: Optional[str] = None) -> Optional[dict[str, object]]:
         """最新の対戦ログを 1 件返却（デッキ名で絞り込み可能）。"""
