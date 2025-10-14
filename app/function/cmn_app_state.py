@@ -25,6 +25,10 @@ class AppState:
     current_match_settings: Optional[dict[str, Any]] = None
     current_match_count: int = 0
     migration_result: str = ""
+    migration_timestamp: str = ""
+    last_backup_path: str = ""
+    last_backup_at: str = ""
+    database_path: str = ""
     db: Optional["DatabaseManager"] = None
 
     def snapshot(self) -> dict[str, Any]:
@@ -41,6 +45,10 @@ class AppState:
             "current_match_settings": self.current_match_settings,
             "current_match_count": self.current_match_count,
             "migration_result": self.migration_result,
+            "migration_timestamp": self.migration_timestamp,
+            "last_backup_path": self.last_backup_path,
+            "last_backup_at": self.last_backup_at,
+            "database_path": self.database_path,
         }
 
     def clone(self) -> "AppState":
@@ -59,6 +67,10 @@ class AppState:
             ),
             current_match_count=self.current_match_count,
             migration_result=self.migration_result,
+            migration_timestamp=self.migration_timestamp,
+            last_backup_path=self.last_backup_path,
+            last_backup_at=self.last_backup_at,
+            database_path=self.database_path,
             db=self.db,
         )
 
@@ -93,6 +105,7 @@ def build_state(
     config: Mapping[str, Any],
     *,
     migration_result: str = "",
+    migration_timestamp: str = "",
 ) -> AppState:
     """Create an :class:`AppState` filled with the latest DB snapshot."""
 
@@ -107,6 +120,10 @@ def build_state(
         current_match_settings=None,
         current_match_count=0,
         migration_result=migration_result,
+        migration_timestamp=migration_timestamp,
+        last_backup_path=db.get_metadata("last_backup", "") or "",
+        last_backup_at=db.get_metadata("last_backup_at", "") or "",
+        database_path=str(db.db_path),
         db=db,
     )
     return state

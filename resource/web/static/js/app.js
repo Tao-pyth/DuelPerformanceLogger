@@ -3,14 +3,15 @@ const migrationEl = document.getElementById("migration-result");
 const deckCountEl = document.getElementById("deck-count");
 const seasonCountEl = document.getElementById("season-count");
 const matchCountEl = document.getElementById("match-count");
-const uiModeEl = document.getElementById("ui-mode");
 const matchesTableBody = document.querySelector("#matches-table tbody");
 const refreshButton = document.getElementById("refresh-button");
 const toastEl = document.getElementById("toast");
 const deckTableBody = document.querySelector("#deck-table tbody");
 const opponentTableBody = document.querySelector("#opponent-deck-table tbody");
 const matchStartSelect = document.getElementById("match-start-deck");
-const matchOpponentSelect = document.getElementById("match-opponent");
+const matchStartSeasonSelect = document.getElementById("match-start-season");
+const matchOpponentInput = document.getElementById("match-opponent");
+const matchOpponentList = document.getElementById("match-opponent-list");
 const deckForm = document.getElementById("deck-form");
 const opponentDeckForm = document.getElementById("opponent-deck-form");
 const matchStartForm = document.getElementById("match-start-form");
@@ -18,8 +19,17 @@ const matchEntryForm = document.getElementById("match-entry-form");
 const matchEntryDeckNameEl = document.getElementById("match-entry-deck-name");
 const matchEntryNumberEl = document.getElementById("match-entry-number");
 const matchEntryClockEl = document.getElementById("match-entry-clock");
-const settingsUiModeEl = document.getElementById("settings-ui-mode");
+const matchEntrySeasonEl = document.getElementById("match-entry-season");
+const matchEntryDateEl = document.getElementById("match-entry-date");
 const settingsMigrationEl = document.getElementById("settings-migration");
+const settingsMigrationTimestampEl = document.getElementById("settings-migration-timestamp");
+const settingsDbPathEl = document.getElementById("settings-db-path");
+const settingsLastBackupPathEl = document.getElementById("settings-last-backup-path");
+const settingsLastBackupAtEl = document.getElementById("settings-last-backup-at");
+const settingsBackupExportButton = document.getElementById("settings-backup-export");
+const settingsBackupImportInput = document.getElementById("settings-backup-import");
+const settingsImportStatusEl = document.getElementById("settings-import-status");
+const settingsResetButton = document.getElementById("settings-reset-db");
 const keywordForm = document.getElementById("keyword-form");
 const keywordNameInput = document.getElementById("keyword-name");
 const keywordDescriptionInput = document.getElementById("keyword-description");
@@ -28,6 +38,7 @@ const matchKeywordSelect = document.getElementById("match-keywords");
 const matchListTableBody = document.querySelector("#match-list-table tbody");
 const matchDetailTimestampEl = document.getElementById("match-detail-timestamp");
 const matchDetailDeckEl = document.getElementById("match-detail-deck");
+const matchDetailSeasonEl = document.getElementById("match-detail-season");
 const matchDetailNumberEl = document.getElementById("match-detail-number");
 const matchDetailResultEl = document.getElementById("match-detail-result");
 const matchDetailTurnEl = document.getElementById("match-detail-turn");
@@ -40,9 +51,12 @@ const matchEditForm = document.getElementById("match-edit-form");
 const matchEditDeckSelect = document.getElementById("match-edit-deck");
 const matchEditNumberInput = document.getElementById("match-edit-number");
 const matchEditOpponentSelect = document.getElementById("match-edit-opponent");
+const matchEditSeasonSelect = document.getElementById("match-edit-season");
 const matchEditKeywordsSelect = document.getElementById("match-edit-keywords");
 const matchEditYoutubeInput = document.getElementById("match-edit-youtube");
 const matchEditFavoriteInput = document.getElementById("match-edit-favorite");
+const seasonForm = document.getElementById("season-form");
+const seasonTableBody = document.querySelector("#season-table tbody");
 
 const viewElements = new Map();
 let currentView = "dashboard";
@@ -66,6 +80,8 @@ let latestSnapshot = null;
 const matchEntryState = {
   deckName: "",
   matchNumber: null,
+  seasonId: null,
+  seasonName: "",
 };
 
 let currentMatchDetail = null;
@@ -101,6 +117,12 @@ function updateMatchEntryClock() {
   const seconds = String(now.getSeconds()).padStart(2, "0");
   matchEntryClockEl.textContent = `${hours}:${minutes}:${seconds}`;
   matchEntryClockEl.setAttribute("datetime", now.toISOString());
+  if (matchEntryDateEl) {
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    matchEntryDateEl.textContent = `(${year}/${month}/${day})`;
+  }
 }
 
 function initialiseMatchEntryClock() {
@@ -198,6 +220,73 @@ function formatCount(value) {
     return "0";
   }
   return numeric.toLocaleString("ja-JP");
+}
+
+function formatSeasonPeriod(season) {
+  if (!season) {
+    return "―";
+  }
+  const startDate = season.start_date || "";
+  const startTime = season.start_time || "";
+  const endDate = season.end_date || "";
+  const endTime = season.end_time || "";
+  const startParts = [];
+  if (startDate) {
+    startParts.push(startDate);
+  }
+  if (startTime) {
+    startParts.push(startTime);
+  }
+  const endParts = [];
+  if (endDate) {
+    endParts.push(endDate);
+  }
+  if (endTime) {
+    endParts.push(endTime);
+  }
+  if (!startParts.length && !endParts.length) {
+    return "―";
+  }
+  if (!endParts.length) {
+    return `${startParts.join(" ")} 〜`;
+  }
+  if (!startParts.length) {
+    return `〜 ${endParts.join(" ")}`;
+  }
+  return `${startParts.join(" ")} 〜 ${endParts.join(" ")}`;
+}
+
+function resolveSeasonLabel(seasonId) {
+  if (!seasonId || !latestSnapshot?.seasons) {
+    return "";
+  }
+  const season = latestSnapshot.seasons.find(
+    (item) => String(item.id) === String(seasonId)
+  );
+  if (!season) {
+    return "";
+  }
+  const period = formatSeasonPeriod(season);
+  return period && period !== "―" ? `${season.name}（${period}）` : season.name;
+}
+
+function base64ToBlob(base64, mimeType = "application/octet-stream") {
+  const binary = atob(base64);
+  const length = binary.length;
+  const bytes = new Uint8Array(length);
+  for (let i = 0; i < length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
 }
 
 function formatDateTime(value) {
@@ -358,6 +447,55 @@ function renderOpponentDeckTable(records) {
   });
 }
 
+function renderSeasonTable(records) {
+  if (!seasonTableBody) {
+    return;
+  }
+
+  seasonTableBody.innerHTML = "";
+
+  if (!records.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 4;
+    cell.className = "data-table__empty";
+    cell.textContent = "まだデータがありません。";
+    row.appendChild(cell);
+    seasonTableBody.appendChild(row);
+    return;
+  }
+
+  records.forEach((season) => {
+    const row = document.createElement("tr");
+
+    const nameCell = document.createElement("td");
+    nameCell.textContent = season.name || "(未設定)";
+    row.appendChild(nameCell);
+
+    const periodCell = document.createElement("td");
+    periodCell.textContent = formatSeasonPeriod(season);
+    row.appendChild(periodCell);
+
+    const notesCell = document.createElement("td");
+    notesCell.textContent = season.notes ? season.notes : "―";
+    row.appendChild(notesCell);
+
+    const actionsCell = document.createElement("td");
+    actionsCell.className = "data-table__actions";
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "icon-button";
+    deleteButton.dataset.action = "delete-season";
+    deleteButton.dataset.seasonName = season.name;
+    deleteButton.setAttribute("aria-label", `${season.name} を削除`);
+    deleteButton.textContent = "🗑️";
+    actionsCell.appendChild(deleteButton);
+    row.appendChild(actionsCell);
+
+    seasonTableBody.appendChild(row);
+  });
+}
+
 function renderKeywordTable(keywords) {
   if (!keywordTableBody) {
     return;
@@ -468,6 +606,26 @@ function renderMatchList(records) {
     actionCell.appendChild(detailButton);
     row.appendChild(actionCell);
 
+    const deleteCell = document.createElement("td");
+    deleteCell.className = "data-table__actions";
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "icon-button";
+    deleteButton.dataset.action = "delete-match";
+    if (record.id != null) {
+      deleteButton.dataset.matchId = String(record.id);
+      const identifier = record.match_no ? `#${record.match_no}` : record.id;
+      deleteButton.setAttribute(
+        "aria-label",
+        `対戦情報 ${identifier} を削除`
+      );
+    } else {
+      deleteButton.disabled = true;
+    }
+    deleteButton.textContent = "🗑️";
+    deleteCell.appendChild(deleteButton);
+    row.appendChild(deleteCell);
+
     matchListTableBody.appendChild(row);
   });
 }
@@ -480,6 +638,9 @@ function renderMatchDetail(detail) {
   if (!detail) {
     matchDetailTimestampEl.textContent = "-";
     matchDetailDeckEl.textContent = "-";
+    if (matchDetailSeasonEl) {
+      matchDetailSeasonEl.textContent = "-";
+    }
     matchDetailNumberEl.textContent = "-";
     matchDetailResultEl.textContent = "-";
     matchDetailTurnEl.textContent = "-";
@@ -501,6 +662,10 @@ function renderMatchDetail(detail) {
 
   matchDetailTimestampEl.textContent = formatDateTime(detail.created_at);
   matchDetailDeckEl.textContent = detail.deck_name || "(未設定)";
+  if (matchDetailSeasonEl) {
+    matchDetailSeasonEl.textContent =
+      detail.season_name || resolveSeasonLabel(detail.season_id) || "―";
+  }
   matchDetailNumberEl.textContent = detail.match_no
     ? `#${detail.match_no}`
     : "-";
@@ -601,6 +766,11 @@ function fillMatchEditForm(detail) {
     selectedValue: detail.deck_name || "",
   });
 
+  populateSeasonOptions(latestSnapshot?.seasons ?? [], {
+    editSelect: matchEditSeasonSelect,
+    editValue: detail.season_id ? String(detail.season_id) : "",
+  });
+
   if (matchEditNumberInput) {
     matchEditNumberInput.value = detail.match_no ?? "";
   }
@@ -669,37 +839,99 @@ function populateDeckOptions(decks, options = {}) {
 }
 
 function populateOpponentOptions(records, options = {}) {
-  const { select = matchOpponentSelect, selectedValue } = options;
-  if (!select) {
-    return;
-  }
+  const selectElement = options.select ?? matchEditOpponentSelect;
+  const inputElement = options.input ?? matchOpponentInput;
+  const listElement = options.list ?? matchOpponentList;
+  const selectedValue = options.selectedValue ?? (
+    selectElement ? selectElement.value ?? "" : inputElement?.value ?? ""
+  );
 
-  const current = selectedValue ?? select.value ?? "";
-  select.innerHTML = "";
+  if (selectElement) {
+    const current = selectedValue ?? selectElement.value ?? "";
+    selectElement.innerHTML = "";
 
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "対戦相手デッキを選択...";
-  let matched = false;
-  select.appendChild(placeholder);
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "対戦相手デッキを選択...";
+    let matched = false;
+    selectElement.appendChild(placeholder);
 
-  records.forEach((record) => {
-    const option = document.createElement("option");
-    option.value = record.name;
-    const usage = Number(record.usage_count ?? 0);
-    option.textContent = usage
-      ? `${record.name}（${formatCount(record.usage_count)}回）`
-      : record.name;
-    if (record.name === current) {
-      option.selected = true;
-      matched = true;
+    records.forEach((record) => {
+      const option = document.createElement("option");
+      option.value = record.name;
+      const usage = Number(record.usage_count ?? 0);
+      option.textContent = usage
+        ? `${record.name}（${formatCount(record.usage_count)}回）`
+        : record.name;
+      if (record.name === current) {
+        option.selected = true;
+        matched = true;
+      }
+      selectElement.appendChild(option);
+    });
+
+    if (!current || !matched) {
+      placeholder.selected = true;
     }
-    select.appendChild(option);
-  });
-
-  if (!current || !matched) {
-    placeholder.selected = true;
   }
+
+  if (inputElement && listElement) {
+    const existingValue = options.selectedValue ?? inputElement.value ?? "";
+    listElement.innerHTML = "";
+    records.forEach((record) => {
+      const option = document.createElement("option");
+      option.value = record.name;
+      const usage = Number(record.usage_count ?? 0);
+      option.label = usage
+        ? `${record.name}（${formatCount(record.usage_count)}回）`
+        : record.name;
+      listElement.appendChild(option);
+    });
+    if (existingValue) {
+      inputElement.value = existingValue;
+    }
+  }
+}
+
+function populateSeasonOptions(seasons, options = {}) {
+  const startSelect = options.startSelect ?? matchStartSeasonSelect;
+  const editSelect = options.editSelect ?? matchEditSeasonSelect;
+  const startValue =
+    options.startValue ?? (startSelect ? startSelect.value ?? "" : "");
+  const editValue = options.editValue ?? (editSelect ? editSelect.value ?? "" : "");
+
+  const fill = (select, selected) => {
+    if (!select) {
+      return;
+    }
+    const current = selected ?? "";
+    select.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "シーズンを選択...";
+    placeholder.selected = !current;
+    select.appendChild(placeholder);
+
+    seasons.forEach((season) => {
+      const option = document.createElement("option");
+      option.value = String(season.id);
+      const period = formatSeasonPeriod(season);
+      option.textContent = period && period !== "―"
+        ? `${season.name}（${period}）`
+        : season.name;
+      if (String(season.id) === String(current)) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    });
+
+    if (current && !Array.from(select.options).some((opt) => opt.value === String(current))) {
+      placeholder.selected = true;
+    }
+  };
+
+  fill(startSelect, startValue);
+  fill(editSelect, editValue);
 }
 
 function populateKeywordSelect(select, keywords, selectedValues = []) {
@@ -730,7 +962,14 @@ function updateMatchEntryView() {
   matchEntryNumberEl.textContent =
     matchEntryState.matchNumber !== null ? matchEntryState.matchNumber : "-";
   matchEntryForm.reset();
+  const seasonLabel =
+    resolveSeasonLabel(matchEntryState.seasonId) || matchEntryState.seasonName || "―";
+  if (matchEntrySeasonEl) {
+    matchEntrySeasonEl.textContent = seasonLabel;
+  }
   populateOpponentOptions(latestSnapshot?.opponent_decks ?? [], {
+    input: matchOpponentInput,
+    list: matchOpponentList,
     selectedValue: "",
   });
   populateKeywordSelect(matchKeywordSelect, latestSnapshot?.keywords ?? []);
@@ -746,7 +985,6 @@ function applySnapshot(snapshot) {
   deckCountEl.textContent = snapshot.decks?.length ?? 0;
   seasonCountEl.textContent = snapshot.seasons?.length ?? 0;
   matchCountEl.textContent = snapshot.matches?.length ?? 0;
-  uiModeEl.textContent = snapshot.ui_mode ?? "normal";
 
   const records = snapshot.matches ? [...snapshot.matches] : [];
   records.sort((a, b) => {
@@ -766,7 +1004,14 @@ function applySnapshot(snapshot) {
     : [];
   renderOpponentDeckTable(opponentRecords);
   populateOpponentOptions(opponentRecords, {
-    selectedValue: matchOpponentSelect?.value ?? "",
+    input: matchOpponentInput,
+    list: matchOpponentList,
+    selectedValue: matchOpponentInput?.value ?? "",
+  });
+  populateOpponentOptions(opponentRecords, {
+    select: matchEditOpponentSelect,
+    selectedValue:
+      matchEditOpponentSelect?.value || currentMatchDetail?.opponent_deck || "",
   });
 
   const keywordRecords = snapshot.keywords ? [...snapshot.keywords] : [];
@@ -781,14 +1026,20 @@ function applySnapshot(snapshot) {
     currentMatchDetail?.keyword_ids ?? []
   );
 
+  const seasonRecords = snapshot.seasons ? [...snapshot.seasons] : [];
+  renderSeasonTable(seasonRecords);
+  populateSeasonOptions(seasonRecords, {
+    startSelect: matchStartSeasonSelect,
+    startValue:
+      matchStartSeasonSelect?.value || (matchEntryState.seasonId ? String(matchEntryState.seasonId) : ""),
+    editSelect: matchEditSeasonSelect,
+    editValue:
+      matchEditSeasonSelect?.value || (currentMatchDetail?.season_id ? String(currentMatchDetail.season_id) : ""),
+  });
+
   populateDeckOptions(deckRecords, {
     select: matchEditDeckSelect,
     selectedValue: matchEditDeckSelect?.value || currentMatchDetail?.deck_name || "",
-  });
-  populateOpponentOptions(opponentRecords, {
-    select: matchEditOpponentSelect,
-    selectedValue:
-      matchEditOpponentSelect?.value || currentMatchDetail?.opponent_deck || "",
   });
 
   const matchRecords = snapshot.matches ? [...snapshot.matches] : [];
@@ -809,8 +1060,24 @@ function applySnapshot(snapshot) {
     showMatchDetail(currentMatchDetail.id, { pushHistory: false, navigate: false });
   }
 
-  settingsUiModeEl.textContent = snapshot.ui_mode ?? "normal";
   settingsMigrationEl.textContent = migrationEl.textContent;
+  if (settingsMigrationTimestampEl) {
+    const migrationLabel = snapshot.migration_timestamp
+      ? `最終実行：${formatDateTime(snapshot.migration_timestamp)}`
+      : "最終実行：未実行";
+    settingsMigrationTimestampEl.textContent = migrationLabel;
+  }
+  if (settingsDbPathEl) {
+    settingsDbPathEl.textContent = snapshot.database_path || "―";
+  }
+  if (settingsLastBackupPathEl) {
+    settingsLastBackupPathEl.textContent = snapshot.last_backup_path || "―";
+  }
+  if (settingsLastBackupAtEl) {
+    settingsLastBackupAtEl.textContent = snapshot.last_backup_at
+      ? `最終出力：${formatDateTime(snapshot.last_backup_at)}`
+      : "最終出力：未実行";
+  }
 }
 
 function showNotification(message, durationMs = 2400) {
@@ -886,9 +1153,16 @@ async function fetchSnapshot({ silent = false } = {}) {
   }
 }
 
-async function beginMatchEntry(deckName, { pushHistory = true } = {}) {
+async function beginMatchEntry(
+  deckName,
+  { pushHistory = true, seasonId = null, seasonName = "" } = {}
+) {
   try {
-    const response = await callPy("prepare_match", { deck_name: deckName });
+    const payload = { deck_name: deckName };
+    if (seasonId !== null && seasonId !== "" && seasonId !== false) {
+      payload.season_id = seasonId;
+    }
+    const response = await callPy("prepare_match", payload);
     if (!response || response.ok !== true) {
       const message = response?.error || "対戦情報の準備に失敗しました";
       showNotification(message, 4200);
@@ -897,6 +1171,15 @@ async function beginMatchEntry(deckName, { pushHistory = true } = {}) {
 
     matchEntryState.deckName = response.data.deck_name;
     matchEntryState.matchNumber = response.data.next_match_no;
+    if (response.data.season_id !== undefined && response.data.season_id !== null) {
+      matchEntryState.seasonId = String(response.data.season_id);
+    } else if (seasonId !== null && seasonId !== "") {
+      matchEntryState.seasonId = String(seasonId);
+    } else {
+      matchEntryState.seasonId = null;
+    }
+    matchEntryState.seasonName =
+      seasonName || resolveSeasonLabel(matchEntryState.seasonId) || "";
     updateMatchEntryView();
 
     if (pushHistory) {
@@ -1061,6 +1344,68 @@ if (keywordTableBody) {
   });
 }
 
+if (seasonForm) {
+  seasonForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(seasonForm);
+    const name = formData.get("name")?.toString().trim() ?? "";
+    if (!name) {
+      showNotification("シーズン名を入力してください", 3600);
+      return;
+    }
+
+    const payload = {
+      name,
+      notes: formData.get("notes")?.toString().trim() ?? "",
+      start_date: formData.get("start_date")?.toString() ?? "",
+      start_time: formData.get("start_time")?.toString() ?? "",
+      end_date: formData.get("end_date")?.toString() ?? "",
+      end_time: formData.get("end_time")?.toString() ?? "",
+    };
+
+    try {
+      const response = await callPy("register_season", payload);
+      if (handleOperationResponse(response, "シーズンを登録しました")) {
+        seasonForm.reset();
+      }
+    } catch (error) {
+      handleError(error, "シーズンの登録に失敗しました", {
+        context: "register_season",
+      });
+    }
+  });
+}
+
+if (seasonTableBody) {
+  seasonTableBody.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-action='delete-season']");
+    if (!button) {
+      return;
+    }
+
+    const seasonName = button.dataset.seasonName;
+    if (!seasonName) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `シーズン「${seasonName}」を削除しますか？`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await callPy("delete_season", { name: seasonName });
+      handleOperationResponse(response, "シーズンを削除しました");
+    } catch (error) {
+      handleError(error, "シーズンの削除に失敗しました", {
+        context: "delete_season",
+      });
+    }
+  });
+}
+
 matchStartForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const deckName = matchStartSelect.value.trim();
@@ -1068,7 +1413,15 @@ matchStartForm.addEventListener("submit", async (event) => {
     showNotification("使用するデッキを選択してください", 3600);
     return;
   }
-  await beginMatchEntry(deckName, { pushHistory: true });
+  const seasonId = matchStartSeasonSelect?.value?.trim() ?? "";
+  const seasonName = seasonId
+    ? matchStartSeasonSelect?.selectedOptions?.[0]?.textContent?.trim() ?? ""
+    : "";
+  await beginMatchEntry(deckName, {
+    pushHistory: true,
+    seasonId,
+    seasonName,
+  });
 });
 
 matchEntryForm.addEventListener("submit", async (event) => {
@@ -1106,11 +1459,21 @@ matchEntryForm.addEventListener("submit", async (event) => {
     keywords: selectedKeywords,
     result: Number.parseInt(resultValue.toString(), 10),
   };
+  if (matchEntryState.seasonId) {
+    payload.season_id = matchEntryState.seasonId;
+  }
+  if (matchEntryState.seasonName) {
+    payload.season_name = matchEntryState.seasonName;
+  }
 
   try {
     const response = await callPy("register_match", payload);
     if (handleOperationResponse(response, "対戦情報を登録しました")) {
-      await beginMatchEntry(matchEntryState.deckName, { pushHistory: false });
+      await beginMatchEntry(matchEntryState.deckName, {
+        pushHistory: false,
+        seasonId: matchEntryState.seasonId,
+        seasonName: matchEntryState.seasonName,
+      });
     }
   } catch (error) {
     handleError(error, "対戦情報の登録に失敗しました", { context: "register_match" });
@@ -1121,22 +1484,208 @@ refreshButton.addEventListener("click", () => fetchSnapshot({ silent: false }));
 
 if (matchListTableBody) {
   matchListTableBody.addEventListener("click", async (event) => {
-    const button = event.target.closest("[data-action='view-match-detail']");
-    if (!button) {
+    const detailButton = event.target.closest(
+      "[data-action='view-match-detail']"
+    );
+    if (detailButton) {
+      const matchId = Number.parseInt(detailButton.dataset.matchId ?? "", 10);
+      if (!Number.isInteger(matchId) || matchId <= 0) {
+        showNotification("対戦情報が見つかりません", 3600);
+        return;
+      }
+      await showMatchDetail(matchId, { pushHistory: true, navigate: true });
       return;
     }
-    const matchId = Number.parseInt(button.dataset.matchId ?? "", 10);
-    if (!Number.isInteger(matchId) || matchId <= 0) {
-      showNotification("対戦情報が見つかりません", 3600);
-      return;
+
+    const deleteButton = event.target.closest("[data-action='delete-match']");
+    if (deleteButton) {
+      const matchId = Number.parseInt(deleteButton.dataset.matchId ?? "", 10);
+      if (!Number.isInteger(matchId) || matchId <= 0) {
+        showNotification("対戦情報が見つかりません", 3600);
+        return;
+      }
+      const confirmed = window.confirm(
+        "選択した対戦情報を削除しますか？この操作は取り消せません。"
+      );
+      if (!confirmed) {
+        return;
+      }
+      try {
+        const response = await callPy("delete_match", { id: matchId });
+        handleOperationResponse(response, "対戦情報を削除しました");
+      } catch (error) {
+        handleError(error, "対戦情報の削除に失敗しました", {
+          context: "delete_match",
+        });
+      }
     }
-    await showMatchDetail(matchId, { pushHistory: true, navigate: true });
   });
 }
 
 if (matchDetailEditButton) {
   matchDetailEditButton.addEventListener("click", () => {
     openMatchEditView();
+  });
+}
+
+if (settingsBackupExportButton) {
+  settingsBackupExportButton.addEventListener("click", async () => {
+    if (!hasEel) {
+      showNotification("バックアップ機能は現在利用できません", 4200);
+      return;
+    }
+
+    const originalLabel = settingsBackupExportButton.textContent;
+    settingsBackupExportButton.disabled = true;
+    settingsBackupExportButton.textContent = "出力中...";
+
+    try {
+      const response = await callPy("export_backup_archive");
+      if (!response || response.ok !== true) {
+        const message = response?.error || "バックアップの出力に失敗しました";
+        showNotification(message, 4200);
+        if (settingsImportStatusEl) {
+          settingsImportStatusEl.textContent = `バックアップ出力失敗：${message}`;
+        }
+        return;
+      }
+
+      if (response.snapshot) {
+        applySnapshot(response.snapshot);
+      }
+
+      const archive = response.data || {};
+      if (!archive.content) {
+        showNotification("バックアップデータの生成に失敗しました", 4200);
+        if (settingsImportStatusEl) {
+          settingsImportStatusEl.textContent = "バックアップ出力失敗：生成エラー";
+        }
+        return;
+      }
+
+      const blob = base64ToBlob(archive.content, "application/zip");
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = archive.filename || `dpl-backup-${Date.now()}.zip`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+      if (settingsImportStatusEl) {
+        const generatedAt = archive.generated_at
+          ? `（${formatDateTime(archive.generated_at)}）`
+          : "";
+        settingsImportStatusEl.textContent = `バックアップを出力しました${generatedAt}`;
+      }
+
+      showNotification("バックアップファイルをダウンロードしました");
+    } catch (error) {
+      handleError(error, "バックアップの出力に失敗しました", {
+        context: "export_backup_archive",
+      });
+      if (settingsImportStatusEl) {
+        settingsImportStatusEl.textContent = "バックアップ出力失敗：予期しないエラー";
+      }
+    } finally {
+      settingsBackupExportButton.disabled = false;
+      settingsBackupExportButton.textContent = originalLabel;
+    }
+  });
+}
+
+if (settingsBackupImportInput) {
+  settingsBackupImportInput.addEventListener("change", async (event) => {
+    if (!hasEel) {
+      showNotification("バックアップ機能は現在利用できません", 4200);
+      return;
+    }
+
+    const input = event.currentTarget;
+    const file = input?.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (settingsImportStatusEl) {
+      settingsImportStatusEl.textContent = `インポート準備中：${file.name}`;
+    }
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const content = arrayBufferToBase64(buffer);
+      const response = await callPy("import_backup_archive", {
+        content,
+        filename: file.name,
+      });
+
+      if (!response || response.ok !== true) {
+        const message = response?.error || "バックアップの取り込みに失敗しました";
+        showNotification(message, 4200);
+        if (settingsImportStatusEl) {
+          settingsImportStatusEl.textContent = `インポート失敗：${message}`;
+        }
+        return;
+      }
+
+      if (response.snapshot) {
+        applySnapshot(response.snapshot);
+      }
+
+      if (settingsImportStatusEl) {
+        settingsImportStatusEl.textContent = `バックアップを取り込みました：${file.name}`;
+      }
+
+      showNotification("バックアップデータを取り込みました");
+    } catch (error) {
+      handleError(error, "バックアップの取り込みに失敗しました", {
+        context: "import_backup_archive",
+      });
+      if (settingsImportStatusEl) {
+        settingsImportStatusEl.textContent = "インポート失敗：予期しないエラー";
+      }
+    } finally {
+      if (input) {
+        input.value = "";
+      } else if (event.target && typeof event.target.value === "string") {
+        event.target.value = "";
+      }
+    }
+  });
+}
+
+if (settingsResetButton) {
+  settingsResetButton.addEventListener("click", async () => {
+    if (!hasEel) {
+      showNotification("初期化機能は現在利用できません", 4200);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "データベースを初期化しますか？事前にバックアップを取得することを強く推奨します。"
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await callPy("reset_database");
+      const success = handleOperationResponse(
+        response,
+        "データベースを初期化しました"
+      );
+      if (success && settingsImportStatusEl) {
+        settingsImportStatusEl.textContent = "インポート待機中";
+      }
+    } catch (error) {
+      handleError(error, "データベースの初期化に失敗しました", {
+        context: "reset_database",
+      });
+      if (settingsImportStatusEl) {
+        settingsImportStatusEl.textContent = "初期化失敗";
+      }
+    }
   });
 }
 
@@ -1161,6 +1710,7 @@ if (matchEditForm) {
     const resultValue = formData.get("result")?.toString() ?? "";
     const youtubeUrl = formData.get("youtube_url")?.toString().trim() ?? "";
     const favorite = formData.get("favorite") === "on";
+    const seasonIdValue = formData.get("season_id")?.toString().trim() ?? "";
     const keywords = Array.from(
       matchEditKeywordsSelect?.selectedOptions || []
     )
@@ -1198,6 +1748,7 @@ if (matchEditForm) {
       result: Number.parseInt(resultValue, 10),
       youtube_url: youtubeUrl,
       favorite,
+      season_id: seasonIdValue,
     };
 
     try {

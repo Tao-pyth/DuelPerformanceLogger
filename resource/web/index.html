@@ -53,10 +53,6 @@
                 <dt>対戦ログ数</dt>
                 <dd id="match-count">0</dd>
               </div>
-              <div>
-                <dt>UI モード</dt>
-                <dd id="ui-mode">normal</dd>
-              </div>
             </dl>
           </section>
 
@@ -65,6 +61,9 @@
             <div class="action-grid">
               <button type="button" class="nav-button" data-nav-target="deck-registration">
                 デッキ情報を登録
+              </button>
+              <button type="button" class="nav-button" data-nav-target="season-registration">
+                シーズン情報を登録
               </button>
               <button
                 type="button"
@@ -146,6 +145,64 @@
                   <th scope="col">デッキ名</th>
                   <th scope="col">説明</th>
                   <th scope="col">使用回数</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="4" class="data-table__empty">まだデータがありません。</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-view="season-registration" hidden>
+        <div class="view__content stack">
+          <section class="panel" aria-labelledby="season-registration-title">
+            <h2 id="season-registration-title">シーズン情報登録</h2>
+            <form id="season-form" class="form-grid season-form">
+              <label class="form-field">
+                <span>シーズン名</span>
+                <input type="text" id="season-name" name="name" required maxlength="120" />
+              </label>
+              <div class="season-form__dates">
+                <label class="form-field">
+                  <span>開始日</span>
+                  <input type="date" id="season-start-date" name="start_date" />
+                </label>
+                <label class="form-field">
+                  <span>開始時刻</span>
+                  <input type="time" id="season-start-time" name="start_time" />
+                </label>
+                <label class="form-field">
+                  <span>終了日</span>
+                  <input type="date" id="season-end-date" name="end_date" />
+                </label>
+                <label class="form-field">
+                  <span>終了時刻</span>
+                  <input type="time" id="season-end-time" name="end_time" />
+                </label>
+              </div>
+              <label class="form-field">
+                <span>備考</span>
+                <textarea id="season-notes" name="notes" rows="3" maxlength="400"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit" class="primary-button">登録する</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel" aria-labelledby="season-list-title">
+            <h3 id="season-list-title">登録済みシーズン</h3>
+            <table class="data-table" id="season-table">
+              <thead>
+                <tr>
+                  <th scope="col">シーズン名</th>
+                  <th scope="col">期間</th>
+                  <th scope="col">備考</th>
                   <th scope="col">操作</th>
                 </tr>
               </thead>
@@ -260,6 +317,12 @@
                   <option value="" selected>デッキを選択...</option>
                 </select>
               </label>
+              <label class="form-field">
+                <span>シーズン</span>
+                <select id="match-start-season" name="season_id">
+                  <option value="" selected>シーズンを選択...</option>
+                </select>
+              </label>
               <div class="form-actions">
                 <button type="submit" class="primary-button">対戦情報登録へ</button>
               </div>
@@ -288,6 +351,9 @@
                   <span class="match-entry-meta__item">
                     対戦番号：<span id="match-entry-number">-</span>
                   </span>
+                  <span class="match-entry-meta__item">
+                    シーズン：<span id="match-entry-season">-</span>
+                  </span>
                 </div>
               </div>
             </div>
@@ -298,6 +364,7 @@
                   <time id="match-entry-clock" class="match-entry-clock__time" datetime=""
                     >--:--:--</time
                   >
+                  <span id="match-entry-date" class="match-entry-clock__date">(----/--/--)</span>
                 </div>
 
                 <fieldset class="match-entry-fieldset">
@@ -316,14 +383,21 @@
 
                 <label class="match-entry-select">
                   <span class="match-entry-select__label">対戦相手デッキ</span>
-                  <select id="match-opponent" name="opponent_deck" required>
-                    <option value="" selected>対戦相手デッキを選択...</option>
-                  </select>
+                  <input
+                    type="text"
+                    id="match-opponent"
+                    name="opponent_deck"
+                    list="match-opponent-list"
+                    placeholder="対戦相手デッキを選択または入力..."
+                    required
+                    autocomplete="off"
+                  />
+                  <datalist id="match-opponent-list"></datalist>
                 </label>
 
                 <label class="match-entry-select">
                   <span class="match-entry-select__label">対戦キーワード</span>
-                  <select id="match-keywords" name="keywords" multiple size="4">
+                  <select id="match-keywords" name="keywords" multiple size="3">
                     <option value="" disabled>キーワードを選択...</option>
                   </select>
                   <small class="match-entry-hint">Ctrl / Cmd キーで複数選択できます</small>
@@ -368,11 +442,12 @@
                   <th scope="col">#</th>
                   <th scope="col">勝敗</th>
                   <th scope="col">詳細</th>
+                  <th scope="col">削除</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td colspan="5" class="data-table__empty">まだデータがありません。</td>
+                  <td colspan="6" class="data-table__empty">まだデータがありません。</td>
                 </tr>
               </tbody>
             </table>
@@ -397,6 +472,10 @@
               <div>
                 <dt>使用デッキ</dt>
                 <dd id="match-detail-deck">-</dd>
+              </div>
+              <div>
+                <dt>シーズン</dt>
+                <dd id="match-detail-season">-</dd>
               </div>
               <div>
                 <dt>対戦番号</dt>
@@ -441,6 +520,12 @@
               <label class="form-field">
                 <span>使用デッキ</span>
                 <select id="match-edit-deck" name="deck_name" required></select>
+              </label>
+              <label class="form-field">
+                <span>シーズン</span>
+                <select id="match-edit-season" name="season_id">
+                  <option value="">シーズンを選択...</option>
+                </select>
               </label>
               <label class="form-field">
                 <span>対戦番号</span>
@@ -514,19 +599,57 @@
         <div class="view__content stack">
           <section class="panel" aria-labelledby="settings-title">
             <h2 id="settings-title">設定</h2>
-            <p class="panel__body">
-              アプリケーションの基本情報や利用状況を確認できます。データベースのバックアップやリストアは今後のバージョンで提供予定です。
+            <p class="panel__body panel__body--muted">
+              アプリケーションの状態やバックアップ履歴を確認し、必要に応じてデータのエクスポート・インポートを行えます。
             </p>
             <dl class="info-list">
               <div>
-                <dt>現在の UI モード</dt>
-                <dd id="settings-ui-mode">-</dd>
-              </div>
-              <div>
                 <dt>前回の移行メッセージ</dt>
                 <dd id="settings-migration">-</dd>
+                <p class="settings-subtext" id="settings-migration-timestamp">最終実行：-</p>
+              </div>
+              <div>
+                <dt>データベースの保存先</dt>
+                <dd id="settings-db-path">-</dd>
+              </div>
+              <div>
+                <dt>最新バックアップ</dt>
+                <dd>
+                  <div id="settings-last-backup-path">-</div>
+                  <p class="settings-subtext" id="settings-last-backup-at">-</p>
+                </dd>
               </div>
             </dl>
+          </section>
+
+          <section class="panel" aria-labelledby="settings-backup-title">
+            <div class="panel__header">
+              <h3 id="settings-backup-title">バックアップ / リストア</h3>
+            </div>
+            <div class="settings-backup-actions">
+              <button type="button" class="primary-button" id="settings-backup-export">
+                CSV-Zip をダウンロード
+              </button>
+              <label class="settings-import-button">
+                <input type="file" id="settings-backup-import" accept=".zip" hidden />
+                <span class="secondary-button">CSV-Zip を取り込む</span>
+              </label>
+            </div>
+            <p class="settings-subtext" id="settings-import-status">インポート待機中</p>
+          </section>
+
+          <section class="panel" aria-labelledby="settings-reset-title">
+            <div class="panel__header">
+              <h3 id="settings-reset-title">データベース初期化</h3>
+            </div>
+            <p class="panel__body panel__body--muted">
+              初期化を実行するとすべての対戦情報が削除されます。事前にバックアップを取得してから実行することを推奨します。
+            </p>
+            <div class="form-actions">
+              <button type="button" class="secondary-button" id="settings-reset-db">
+                データベースを初期化
+              </button>
+            </div>
           </section>
         </div>
       </section>
