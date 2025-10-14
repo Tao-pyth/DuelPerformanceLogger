@@ -25,7 +25,7 @@ _DEFAULT_CONFIG_PATH = paths.default_config_path()
 DEFAULT_CONFIG: dict[str, Any] = {
     "database": {
         # Schema version is tracked as a semantic-version string (e.g., "0.1.1").
-        "expected_version": "0.2.0",
+        "expected_version": "0.2.1",
     },
 }
 
