@@ -345,6 +345,44 @@ class DatabaseManager:
                 )
                 schema_changed = True
 
+            if not self._table_exists(connection, "matches"):
+                connection.execute(
+                    """
+                    CREATE TABLE matches (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        match_no INTEGER NOT NULL,
+                        deck_id INTEGER NOT NULL,
+                        season_id INTEGER,
+                        turn INTEGER NOT NULL CHECK (turn IN (0, 1)),
+                        opponent_deck TEXT,
+                        keywords TEXT,
+                        result INTEGER NOT NULL CHECK (result IN (-1, 0, 1)),
+                        youtube_url TEXT DEFAULT '',
+                        favorite INTEGER NOT NULL DEFAULT 0,
+                        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                        FOREIGN KEY(deck_id) REFERENCES decks(id)
+                            ON DELETE RESTRICT
+                            ON UPDATE CASCADE,
+                        FOREIGN KEY(season_id) REFERENCES seasons(id)
+                            ON DELETE SET NULL
+                            ON UPDATE CASCADE
+                    )
+                    """
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_matches_deck_id ON matches(deck_id)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_matches_season_id ON matches(season_id)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_matches_created_at ON matches(created_at)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_matches_result ON matches(result)"
+                )
+                schema_changed = True
+
             if not self._table_exists(connection, "opponent_decks"):
                 connection.execute(
                     """
