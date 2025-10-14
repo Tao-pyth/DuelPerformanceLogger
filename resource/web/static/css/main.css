@@ -186,7 +186,7 @@ legend {
 
 .form-field select[multiple],
 .match-entry-select select[multiple] {
-  min-height: 140px;
+  min-height: 110px;
 }
 
 .form-actions {
@@ -231,6 +231,42 @@ legend {
 .info-list dd {
   margin: 6px 0 0;
   font-size: 1.05rem;
+}
+
+.settings-subtext {
+  margin: 6px 0 0;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.settings-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 12px 0;
+}
+
+.settings-import-button {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+#settings-import-status {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#settings-last-backup-path {
+  word-break: break-all;
+}
+
+.season-form__dates {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .panel__header {
@@ -356,11 +392,19 @@ legend {
 }
 
 .match-entry-clock__time {
-  font-size: clamp(2.1rem, 5vw, 3.2rem);
+  font-size: clamp(2.4rem, 6vw, 3.8rem);
   font-weight: 700;
   letter-spacing: 0.08em;
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
+  line-height: 1.05;
+}
+
+.match-entry-clock__date {
+  font-size: clamp(0.95rem, 2.2vw, 1.1rem);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.78);
+  font-variant-numeric: tabular-nums;
 }
 
 .match-entry-form {
@@ -434,16 +478,19 @@ legend {
 }
 
 .match-entry-row {
-  display: flex;
+  display: grid;
   gap: 16px;
   align-items: stretch;
-  overflow-x: auto;
-  padding-bottom: 6px;
-  scrollbar-width: thin;
+  grid-template-columns:
+    minmax(200px, 2fr)
+    minmax(160px, 1fr)
+    minmax(220px, 2fr)
+    minmax(240px, 2fr)
+    minmax(160px, 1fr);
 }
 
 .match-entry-row > * {
-  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .match-entry-fieldset {
@@ -540,11 +587,8 @@ legend {
 }
 @media (max-width: 960px) {
   .match-entry-row {
-    flex-wrap: wrap;
-  }
-
-  .match-entry-row > * {
-    flex: 1 1 280px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    row-gap: 12px;
   }
 }
 

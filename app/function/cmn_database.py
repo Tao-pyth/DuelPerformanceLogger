@@ -21,6 +21,7 @@ UI 層では辞書（dict）ベースのデータ構造だけを扱えるよう�
 from __future__ import annotations
 
 import csv
+import io
 import json
 import sqlite3
 import uuid
@@ -29,6 +30,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
+import tempfile
+import zipfile
 
 from app.function.core import paths
 
@@ -54,11 +57,13 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    CURRENT_SCHEMA_VERSION = "0.1.1"
+    CURRENT_SCHEMA_VERSION = "0.2.0"
     METADATA_DEFAULTS = {
         "schema_version": CURRENT_SCHEMA_VERSION,
         "ui_mode": "normal",
         "last_backup": "",
+        "last_backup_at": "",
+        "last_migration_message_at": "",
     }
 
     def __init__(self, db_path: Optional[Path | str] = None) -> None:
@@ -254,6 +259,7 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     match_no INTEGER NOT NULL,
                     deck_id INTEGER NOT NULL,
+                    season_id INTEGER,
                     turn INTEGER NOT NULL CHECK (turn IN (0, 1)),
                     opponent_deck TEXT,
                     keywords TEXT,
@@ -265,10 +271,15 @@ class DatabaseManager:
                     FOREIGN KEY(deck_id)
                         REFERENCES decks(id)
                         ON DELETE RESTRICT
+                        ON UPDATE CASCADE,
+                    FOREIGN KEY(season_id)
+                        REFERENCES seasons(id)
+                        ON DELETE SET NULL
                         ON UPDATE CASCADE
                 );
 
                 CREATE INDEX idx_matches_deck_id ON matches(deck_id);
+                CREATE INDEX idx_matches_season_id ON matches(season_id);
                 CREATE INDEX idx_matches_created_at ON matches(created_at);
                 CREATE INDEX idx_matches_result ON matches(result);
                 """
@@ -285,6 +296,14 @@ class DatabaseManager:
             cursor.execute(
                 "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
                 ("last_backup", ""),
+            )
+            cursor.execute(
+                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
+                ("last_backup_at", ""),
+            )
+            cursor.execute(
+                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
+                ("last_migration_message_at", ""),
             )
 
     # ------------------------------------------------------------------
@@ -354,6 +373,14 @@ class DatabaseManager:
                 keyword_changed = True
 
             if self._table_exists(connection, "matches"):
+                if not self._column_exists(connection, "matches", "season_id"):
+                    connection.execute(
+                        "ALTER TABLE matches ADD COLUMN season_id INTEGER"
+                    )
+                    connection.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_matches_season_id ON matches(season_id)"
+                    )
+                    schema_changed = True
                 if not self._column_exists(connection, "matches", "youtube_url"):
                     connection.execute(
                         "ALTER TABLE matches ADD COLUMN youtube_url TEXT DEFAULT ''"
@@ -483,6 +510,15 @@ class DatabaseManager:
                                     row_map["turn"] = self._encode_turn(row_map["turn"])
                                 if "result" in row_map:
                                     row_map["result"] = self._encode_result(row_map["result"])
+                                if "season_id" in insert_columns:
+                                    season_value = row_map.get("season_id")
+                                    if season_value in (None, "", "null", "NULL"):
+                                        row_map["season_id"] = None
+                                    else:
+                                        try:
+                                            row_map["season_id"] = int(season_value)
+                                        except (TypeError, ValueError):
+                                            row_map["season_id"] = None
                                 deck_identifier = row_map.get("deck_id")
                                 if deck_identifier in (None, "", 0):
                                     deck_name_value = str(row_map.get("deck_name", "") or "").strip()
@@ -513,6 +549,63 @@ class DatabaseManager:
         self.recalculate_usage_counts()
         return restored
 
+    def export_backup_zip(
+        self, destination: Optional[Path | str] = None
+    ) -> tuple[Path, str, bytes]:
+        """バックアップ CSV を生成し ZIP 圧縮したバイト列を返す。"""
+
+        backup_dir = self.export_backup(destination)
+        archive_name = f"dpl-backup-{backup_dir.name}.zip"
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for csv_file in sorted(backup_dir.glob("*.csv")):
+                archive.write(csv_file, arcname=csv_file.name)
+
+        buffer.seek(0)
+        return backup_dir, archive_name, buffer.read()
+
+    def import_backup_archive(self, payload: bytes) -> dict[str, int]:
+        """ZIP 化されたバックアップからデータを復元する。"""
+
+        if not payload:
+            raise DatabaseError("バックアップデータが空です")
+
+        expected_files = {
+            "decks.csv",
+            "opponent_decks.csv",
+            "seasons.csv",
+            "matches.csv",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                members = [info for info in archive.infolist() if not info.is_dir()]
+                found_files = {Path(info.filename).name for info in members}
+                missing = expected_files - found_files
+                if missing:
+                    raise DatabaseError(
+                        "バックアップに必要なファイルが不足しています: "
+                        + ", ".join(sorted(missing))
+                    )
+
+                for info in members:
+                    name = Path(info.filename).name
+                    if name not in expected_files:
+                        continue
+                    target_path = temp_path / name
+                    with archive.open(info) as source, target_path.open("wb") as dest:
+                        dest.write(source.read())
+
+            return self.import_backup(temp_path)
+
+    def reset_database(self) -> None:
+        """テーブルを再構築して空の状態へ初期化する。"""
+
+        self.initialize_database()
+        self.ensure_metadata_defaults()
+
     # ------------------------------------------------------------------
     # 取得系ヘルパー
     # ------------------------------------------------------------------
@@ -534,8 +627,9 @@ class DatabaseManager:
             cursor = connection.execute(
                 """
                 SELECT
+                    id,
                     name,
-                    description,
+                    description AS notes,
                     start_date,
                     start_time,
                     end_date,
@@ -544,7 +638,13 @@ class DatabaseManager:
                 ORDER BY name COLLATE NOCASE
                 """
             )
-            return [dict(row) for row in cursor.fetchall()]
+            results: list[dict[str, object]] = []
+            for row in cursor.fetchall():
+                payload = dict(row)
+                payload.setdefault("notes", payload.get("description", ""))
+                payload.pop("description", None)
+                results.append(payload)
+            return results
 
     def fetch_matches(self, deck_name: Optional[str] = None) -> list[dict[str, object]]:
         """対戦ログを返却します。
@@ -561,11 +661,13 @@ class DatabaseManager:
             params: tuple[object, ...] = ()
             query = (
                 "SELECT "
-                "m.id, m.match_no, m.deck_id, d.name AS deck_name, m.turn, "
+                "m.id, m.match_no, m.deck_id, d.name AS deck_name, "
+                "m.season_id, s.name AS season_name, m.turn, "
                 "m.opponent_deck, m.keywords, m.result, m.created_at, "
                 "m.youtube_url, m.favorite "
                 "FROM matches AS m "
-                "JOIN decks AS d ON d.id = m.deck_id"
+                "JOIN decks AS d ON d.id = m.deck_id "
+                "LEFT JOIN seasons AS s ON s.id = m.season_id"
             )
 
             if deck_name:
@@ -587,11 +689,13 @@ class DatabaseManager:
         """最新の対戦ログを 1 件返却（デッキ名で絞り込み可能）。"""
         query = (
             "SELECT "
-            "m.id, m.match_no, m.deck_id, d.name AS deck_name, m.turn, "
+            "m.id, m.match_no, m.deck_id, d.name AS deck_name, "
+            "m.season_id, s.name AS season_name, m.turn, "
             "m.opponent_deck, m.keywords, m.result, m.created_at, "
             "m.youtube_url, m.favorite "
             "FROM matches AS m "
-            "JOIN decks AS d ON d.id = m.deck_id"
+            "JOIN decks AS d ON d.id = m.deck_id "
+            "LEFT JOIN seasons AS s ON s.id = m.season_id"
         )
 
         with self._connect() as connection:
@@ -652,7 +756,7 @@ class DatabaseManager:
     def add_season(
         self,
         name: str,
-        description: str = "",
+        notes: str = "",
         *,
         start_date: str | None = None,
         start_time: str | None = None,
@@ -669,7 +773,7 @@ class DatabaseManager:
                     )
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (name, description, start_date, start_time, end_date, end_time),
+                    (name, notes, start_date, start_time, end_date, end_time),
                 )
         except sqlite3.IntegrityError as exc:  # pragma: no cover - defensive
             log_error("Duplicate season insertion attempted", exc, name=name)
@@ -729,10 +833,27 @@ class DatabaseManager:
         raw_keywords = record.get("keywords") or []
         youtube_url = str(record.get("youtube_url", "") or "").strip()
         favorite_flag = 1 if bool(record.get("favorite")) else 0
+        season_id: Optional[int] = None
+        season_input = record.get("season_id")
+        season_name_input = record.get("season_name")
 
         try:
             with self._connect() as connection:
                 deck_id = self._get_deck_id(connection, deck_name)
+                if season_input not in (None, ""):
+                    try:
+                        candidate = int(season_input)
+                    except (TypeError, ValueError) as exc:
+                        raise DatabaseError("シーズン ID が不正です") from exc
+                    if candidate <= 0:
+                        raise DatabaseError("シーズン ID が不正です")
+                    season_id = candidate
+                elif season_name_input:
+                    season_id = self._find_season_id(
+                        connection, str(season_name_input or "")
+                    )
+                    if season_name_input and season_id is None:
+                        raise DatabaseError("指定したシーズンが見つかりません")
                 keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
                 filtered_keywords = [
                     str(value or "").strip()
@@ -750,6 +871,7 @@ class DatabaseManager:
                     INSERT INTO matches (
                         match_no,
                         deck_id,
+                        season_id,
                         turn,
                         opponent_deck,
                         keywords,
@@ -757,11 +879,12 @@ class DatabaseManager:
                         youtube_url,
                         favorite
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.get("match_no", 0),
                         deck_id,
+                        season_id,
                         turn_value,
                         opponent_name if opponent_name else None,
                         keywords_json,
@@ -955,6 +1078,8 @@ class DatabaseManager:
                     m.match_no,
                     m.deck_id,
                     d.name AS deck_name,
+                    m.season_id,
+                    s.name AS season_name,
                     m.turn,
                     m.opponent_deck,
                     m.keywords,
@@ -964,6 +1089,7 @@ class DatabaseManager:
                     m.favorite
                 FROM matches AS m
                 JOIN decks AS d ON d.id = m.deck_id
+                LEFT JOIN seasons AS s ON s.id = m.season_id
                 WHERE m.id = ?
                 """,
                 (match_id,),
@@ -994,11 +1120,33 @@ class DatabaseManager:
 
             old_deck_id = int(row["deck_id"])
             old_deck_name = row["deck_name"]
+            old_season_id = row["season_id"] if "season_id" in row.keys() else None
             new_deck_name = str(updates.get("deck_name", old_deck_name) or "").strip()
             if not new_deck_name:
                 raise DatabaseError("デッキ名を指定してください")
 
             new_deck_id = self._get_deck_id(connection, new_deck_name)
+
+            season_id_value = old_season_id
+            if "season_id" in updates or "season_name" in updates:
+                season_input = updates.get("season_id")
+                season_name_input = updates.get("season_name")
+                if season_input not in (None, ""):
+                    try:
+                        candidate = int(season_input)
+                    except (TypeError, ValueError) as exc:
+                        raise DatabaseError("シーズン ID が不正です") from exc
+                    if candidate <= 0:
+                        raise DatabaseError("シーズン ID が不正です")
+                    season_id_value = candidate
+                elif season_name_input:
+                    season_id_value = self._find_season_id(
+                        connection, str(season_name_input or "")
+                    )
+                    if season_name_input and season_id_value is None:
+                        raise DatabaseError("指定したシーズンが見つかりません")
+                else:
+                    season_id_value = None
 
             match_no_value = updates.get("match_no", row["match_no"])
             try:
@@ -1079,6 +1227,7 @@ class DatabaseManager:
                 UPDATE matches
                 SET match_no = ?,
                     deck_id = ?,
+                    season_id = ?,
                     turn = ?,
                     opponent_deck = ?,
                     keywords = ?,
@@ -1090,6 +1239,7 @@ class DatabaseManager:
                 (
                     match_no,
                     new_deck_id,
+                    season_id_value,
                     turn_value,
                     opponent_name if opponent_name else None,
                     keywords_json,
@@ -1161,6 +1311,71 @@ class DatabaseManager:
                 )
 
         return self.fetch_match(match_id)
+
+    def delete_match(self, match_id: int) -> None:
+        """対戦ログを削除し、関連する使用回数を更新する。"""
+
+        with self.transaction() as connection:
+            keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
+            cursor = connection.execute(
+                "SELECT deck_id, opponent_deck, keywords FROM matches WHERE id = ?",
+                (match_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise DatabaseError("指定した対戦情報が見つかりません")
+
+            deck_id = row["deck_id"]
+            opponent_name = (row["opponent_deck"] or "").strip()
+            keyword_ids: list[str] = []
+            if row["keywords"]:
+                try:
+                    keyword_ids = self._sanitize_keyword_ids_from_lookup(
+                        keyword_lookup, name_lookup, json.loads(row["keywords"])
+                    )
+                except json.JSONDecodeError:
+                    keyword_ids = []
+
+            connection.execute("DELETE FROM matches WHERE id = ?", (match_id,))
+
+            if deck_id is not None:
+                connection.execute(
+                    """
+                    UPDATE decks
+                    SET usage_count = CASE
+                        WHEN usage_count > 0 THEN usage_count - 1
+                        ELSE 0
+                    END
+                    WHERE id = ?
+                    """,
+                    (deck_id,),
+                )
+
+            if opponent_name:
+                connection.execute(
+                    """
+                    UPDATE opponent_decks
+                    SET usage_count = CASE
+                        WHEN usage_count > 0 THEN usage_count - 1
+                        ELSE 0
+                    END
+                    WHERE name = ?
+                    """,
+                    (opponent_name,),
+                )
+
+            for identifier in keyword_ids:
+                connection.execute(
+                    """
+                    UPDATE keywords
+                    SET usage_count = CASE
+                        WHEN usage_count > 0 THEN usage_count - 1
+                        ELSE 0
+                    END
+                    WHERE identifier = ?
+                    """,
+                    (identifier,),
+                )
 
     def recalculate_usage_counts(self) -> None:
         """デッキと対戦相手デッキの使用回数を対戦ログから再計算する。"""
@@ -1273,6 +1488,27 @@ class DatabaseManager:
             raise DatabaseError(f"デッキ「{deck_name}」が見つかりません")
         return deck_id
 
+    def _find_season_id(
+        self, connection: sqlite3.Connection, season_name: str
+    ) -> Optional[int]:
+        cleaned = (season_name or "").strip()
+        if not cleaned:
+            return None
+        cursor = connection.execute(
+            "SELECT id FROM seasons WHERE name = ?",
+            (cleaned,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return int(row["id"])
+
+    def _get_season_id(self, connection: sqlite3.Connection, season_name: str) -> int:
+        season_id = self._find_season_id(connection, season_name)
+        if season_id is None:
+            raise DatabaseError(f"シーズン「{season_name}」が見つかりません")
+        return season_id
+
     def _hydrate_match_row(
         self,
         row: sqlite3.Row,
@@ -1297,6 +1533,8 @@ class DatabaseManager:
             "id": row["id"],
             "match_no": row["match_no"],
             "deck_name": row["deck_name"],
+            "season_id": row["season_id"],
+            "season_name": row["season_name"] or "",
             "turn": self._decode_turn(row["turn"]),
             "opponent_deck": row["opponent_deck"] or "",
             "keywords": [item["name"] for item in keyword_details],
