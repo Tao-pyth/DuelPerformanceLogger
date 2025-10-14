@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import base64
+import sqlite3
 from datetime import datetime
 from typing import Any, Optional
 
@@ -37,8 +38,14 @@ class DuelPerformanceService:
     def __init__(self) -> None:
         self.config = load_config()
         self.db = DatabaseManager()
-        self.db.ensure_database()
-        self.migration_result = ""
+        try:
+            self.db.ensure_database()
+        except (sqlite3.DatabaseError, DatabaseError) as exc:
+            self.migration_result = self._handle_startup_migration_failure(exc)
+        else:
+            self.migration_result = (
+                self.db.get_metadata("last_migration_message", "") or ""
+            )
         self.migration_timestamp = (
             self.db.get_metadata("last_migration_message_at", "") or ""
         )
@@ -56,7 +63,9 @@ class DuelPerformanceService:
                 current_version, expected_version
             )
         else:
-            self.migration_result = ""
+            self.migration_result = (
+                self.db.get_metadata("last_migration_message", "") or ""
+            )
 
         self.db.set_schema_version(expected_version)
         self.migration_timestamp = (
@@ -262,6 +271,8 @@ class DuelPerformanceService:
     def reset_database(self) -> AppState:
         self.db.reset_database()
         self.db.set_schema_version(self._expected_schema_version())
+        self.db.set_metadata("last_migration_message", "")
+        self.db.set_metadata("last_migration_message_at", "")
         self.migration_result = ""
         self.migration_timestamp = ""
         return self.refresh_state()
@@ -333,6 +344,66 @@ class DuelPerformanceService:
                 ]
             )
 
+        self.db.set_metadata("last_migration_message", message)
+        self.db.set_metadata("last_migration_message_at", timestamp_iso)
+        self.migration_timestamp = timestamp_iso
+        return message
+
+    def _handle_startup_migration_failure(self, error: Exception) -> str:
+        """Attempt automatic recovery when the schema migration fails on startup."""
+
+        timestamp_iso = datetime.now().astimezone().isoformat()
+        lines = [
+            get_text("settings.db_migration_auto_recovery").format(error=str(error))
+        ]
+
+        log_db_error("Automatic schema recovery triggered", error)
+
+        backup_path = None
+        try:
+            backup_path = self.db.export_backup()
+            self.db.record_backup_path(backup_path)
+            self.db.set_metadata("last_backup_at", timestamp_iso)
+            lines.append(
+                get_text("settings.db_migration_backup").format(path=str(backup_path))
+            )
+        except Exception as backup_exc:  # pragma: no cover - defensive
+            log_db_error("Failed to export backup during auto recovery", backup_exc)
+            lines.append(
+                get_text("settings.db_migration_backup_failed").format(
+                    error=str(backup_exc)
+                )
+            )
+
+        self.db.initialize_database()
+        self.db.set_schema_version(self._expected_schema_version())
+        lines.append(get_text("settings.db_migration_reset_performed"))
+
+        if backup_path is not None:
+            try:
+                restored = self.db.import_backup(backup_path)
+            except DatabaseError as exc:
+                log_db_error(
+                    "Failed to restore database during auto recovery",
+                    exc,
+                    backup=str(backup_path),
+                )
+                lines.append(
+                    get_text("settings.db_migration_restore_failed").format(
+                        error=str(exc)
+                    )
+                )
+            else:
+                lines.append(
+                    get_text("settings.db_migration_restore_success").format(
+                        decks=restored.get("decks", 0),
+                        seasons=restored.get("seasons", 0),
+                        matches=restored.get("matches", 0),
+                    )
+                )
+
+        message = "\n".join(lines)
+        self.db.set_metadata("last_migration_message", message)
         self.db.set_metadata("last_migration_message_at", timestamp_iso)
         self.migration_timestamp = timestamp_iso
         return message
