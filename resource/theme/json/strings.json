@@ -165,10 +165,13 @@
     "db_migration_title": "データベース更新結果",
     "db_migration_detected": "DBバージョンの不一致を検出しました（現在: {current} / 期待: {expected}）",
     "db_migration_backup": "既存データをバックアップしました: {path}",
+    "db_migration_backup_failed": "既存データのバックアップに失敗しました: {error}",
     "db_migration_restore_success": "バックアップから復元しました（デッキ: {decks} 件 / シーズン: {seasons} 件 / 対戦: {matches} 件）",
     "db_migration_restore_failed": "バックアップの復元に失敗しました: {error}",
     "db_migration_success": "データベースを最新バージョンへ更新しました。",
-    "db_migration_failure": "データベース更新時にエラーが発生しました: {error}"
+    "db_migration_failure": "データベース更新時にエラーが発生しました: {error}",
+    "db_migration_auto_recovery": "起動時にスキーマ更新エラーを検出したため自動復旧を実行しました: {error}",
+    "db_migration_reset_performed": "旧データベースを初期化し、最新スキーマで再構築しました。"
   },
   "placeholders": {
     "card_list": "カードリスト機能は現在準備中です。",

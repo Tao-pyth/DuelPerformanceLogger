@@ -63,6 +63,7 @@ class DatabaseManager:
         "ui_mode": "normal",
         "last_backup": "",
         "last_backup_at": "",
+        "last_migration_message": "",
         "last_migration_message_at": "",
     }
 
@@ -300,6 +301,10 @@ class DatabaseManager:
             cursor.execute(
                 "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
                 ("last_backup_at", ""),
+            )
+            cursor.execute(
+                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
+                ("last_migration_message", ""),
             )
             cursor.execute(
                 "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
@@ -1383,17 +1388,18 @@ class DatabaseManager:
         with self._connect() as connection:
             connection.execute("UPDATE decks SET usage_count = 0")
 
-            cursor = connection.execute(
-                "SELECT deck_id, COUNT(*) AS match_count FROM matches GROUP BY deck_id"
-            )
-            for row in cursor.fetchall():
-                deck_id = row["deck_id"]
-                if deck_id is None:
-                    continue
-                connection.execute(
-                    "UPDATE decks SET usage_count = ? WHERE id = ?",
-                    (int(row["match_count"]), deck_id),
+            if self._column_exists(connection, "matches", "deck_id"):
+                cursor = connection.execute(
+                    "SELECT deck_id, COUNT(*) AS match_count FROM matches GROUP BY deck_id"
                 )
+                for row in cursor.fetchall():
+                    deck_id = row["deck_id"]
+                    if deck_id is None:
+                        continue
+                    connection.execute(
+                        "UPDATE decks SET usage_count = ? WHERE id = ?",
+                        (int(row["match_count"]), deck_id),
+                    )
 
             cursor = connection.execute("SELECT name FROM opponent_decks")
             for row in cursor.fetchall():
