@@ -18,6 +18,8 @@ DPL の可観測性を確保するために、ログ出力、ローテーショ�
 - Critical events may be forwarded to Windows Event Log (`Application` source)。監査要件を満たします。
 - Debug trace: `%LOCALAPPDATA%/DuelPerformanceLogger/logs/debug.log` (`DEBUG` level)。詳細追跡向けです。
 - Updater log: `%LOCALAPPDATA%/DuelPerformanceLogger/logs/updater.log`。Updater.exe 専用ログです。
+- Application-facing modules (anything under `app/function/`) must emit logs exclusively via `function/cmn_logger.py` helpers。アプリ領域のログ窓口を `cmn_logger` に集約します。
+- Direct `logging` module usage is reserved for third-party libraries, bootstrap scripts, and migration scaffolding。標準 `logging` は外部/起動時の最小限ログのみに制限します。
 
 ## <a id="log-format-levels"></a>Log Format & Levels / ログフォーマットとレベル
 統一された表記により、解析とアラート設定を容易にします。
@@ -53,6 +55,8 @@ Log levels:
 - Updater events: include `updater.phase` with values `download`, `apply`, `restart`。進行状況を明確化します。
 - Migrations: log `migration.step` and `migration.version` for each stage。履歴追跡を容易にします。
 - Async tasks: emit `async.task_id` and `async.status` fields。スレッド処理を関連付けます。
+- Exception logging must include `context`, `stack`, and `user_input_hash` fields when available。例外発生時はコンテキスト、スタック、ユーザー入力のハッシュを付与し、PII を含めずに追跡可能性を確保します。
+- Persist failure payloads under `%LOCALAPPDATA%/DuelPerformanceLogger/logs/errors/` when `cmn_logger.log_exception` receives `persist=True`。重大障害時の添付資料として利用します。
 
 ## <a id="monitoring-telemetry"></a>Monitoring & Telemetry / モニタリングとテレメトリ
 `docs/08_logging_monitoring.md` の内容を統合し、監視・可視化・メトリクスの指針をまとめます。

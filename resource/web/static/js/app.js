@@ -72,6 +72,25 @@ let currentMatchDetail = null;
 
 let matchEntryClockTimer = null;
 
+const eelBridge = typeof window !== "undefined" ? window.eel : undefined;
+const hasEel = Boolean(eelBridge);
+
+if (!hasEel) {
+  console.info("Eel bridge is not available; running in fallback mode.");
+}
+
+const callPy = (name, ...args) => {
+  if (!hasEel || typeof eelBridge[name] !== "function") {
+    return Promise.reject(new Error(`[EEL_UNAVAILABLE] ${name}`));
+  }
+  try {
+    const result = eelBridge[name](...args);
+    return typeof result === "function" ? result() : result;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+};
+
 function updateMatchEntryClock() {
   if (!matchEntryClockEl) {
     return;
@@ -536,7 +555,7 @@ async function showMatchDetail(matchId, { pushHistory = true, navigate = true } 
   }
 
   try {
-    const response = await eel.get_match_detail({ id: matchId })();
+    const response = await callPy("get_match_detail", { id: matchId });
     if (!response || response.ok !== true) {
       const message = response?.error || "対戦情報を取得できませんでした";
       showNotification(message, 4200);
@@ -554,9 +573,9 @@ async function showMatchDetail(matchId, { pushHistory = true, navigate = true } 
     }
     return true;
   } catch (error) {
-    console.error("Failed to fetch match detail", error);
-    showNotification("対戦情報の取得に失敗しました", 4200);
-    return false;
+    return handleError(error, "対戦情報の取得に失敗しました", {
+      context: "get_match_detail",
+    });
   }
 }
 
@@ -812,11 +831,33 @@ function showNotification(message, durationMs = 2400) {
   }, durationMs);
 }
 
-eel.expose(showNotification, "show_notification");
+if (hasEel && typeof eelBridge.expose === "function") {
+  eelBridge.expose(showNotification, "show_notification");
+}
+
+function handleError(error, friendlyMessage, options = {}) {
+  const { durationMs = 4200, context } = options;
+  const message = friendlyMessage ?? "予期しないエラーが発生しました";
+  const prefix = context ? `${context}: ${message}` : message;
+  console.error(prefix, error);
+  showNotification(message, durationMs);
+  return false;
+}
+
+function validateRequired(value, label, { message, durationMs = 3600 } = {}) {
+  const normalized = typeof value === "string" ? value.trim() : value;
+  if (normalized) {
+    return normalized;
+  }
+  const text = message ?? `${label ?? "値"}を入力してください`;
+  showNotification(text, durationMs);
+  return null;
+}
 
 function handleOperationResponse(response, successMessage) {
   if (!response || response.ok !== true) {
     const errorMessage = response?.error || "操作に失敗しました";
+    console.error("Operation failed", response);
     showNotification(errorMessage, 4200);
     return false;
   }
@@ -833,20 +874,21 @@ function handleOperationResponse(response, successMessage) {
 
 async function fetchSnapshot({ silent = false } = {}) {
   try {
-    const snapshot = await eel.fetch_snapshot()();
+    const snapshot = await callPy("fetch_snapshot");
     applySnapshot(snapshot);
     if (!silent) {
       showNotification("最新のデータを読み込みました");
     }
   } catch (error) {
-    console.error("Failed to fetch snapshot", error);
-    showNotification("データの取得に失敗しました", 4200);
+    handleError(error, "データの取得に失敗しました", {
+      context: "fetch_snapshot",
+    });
   }
 }
 
 async function beginMatchEntry(deckName, { pushHistory = true } = {}) {
   try {
-    const response = await eel.prepare_match({ deck_name: deckName })();
+    const response = await callPy("prepare_match", { deck_name: deckName });
     if (!response || response.ok !== true) {
       const message = response?.error || "対戦情報の準備に失敗しました";
       showNotification(message, 4200);
@@ -862,52 +904,50 @@ async function beginMatchEntry(deckName, { pushHistory = true } = {}) {
     }
     return true;
   } catch (error) {
-    console.error("Failed to prepare match", error);
-    showNotification("対戦情報の準備に失敗しました", 4200);
-    return false;
+    return handleError(error, "対戦情報の準備に失敗しました", {
+      context: "prepare_match",
+    });
   }
 }
 
 deckForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(deckForm);
-  const name = formData.get("name")?.toString().trim() ?? "";
-  const description = formData.get("description")?.toString().trim() ?? "";
-
-  if (!name) {
-    showNotification("デッキ名を入力してください", 3600);
+  const rawName = formData.get("name")?.toString() ?? "";
+  const name = validateRequired(rawName, "デッキ名");
+  if (name === null) {
     return;
   }
+  const description = formData.get("description")?.toString().trim() ?? "";
 
   try {
-    const response = await eel.register_deck({ name, description })();
+    const response = await callPy("register_deck", { name, description });
     if (handleOperationResponse(response, "デッキを登録しました")) {
       deckForm.reset();
     }
   } catch (error) {
-    console.error("Failed to register deck", error);
-    showNotification("デッキの登録に失敗しました", 4200);
+    handleError(error, "デッキの登録に失敗しました", { context: "register_deck" });
   }
 });
 
 opponentDeckForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(opponentDeckForm);
-  const name = formData.get("name")?.toString().trim() ?? "";
-
-  if (!name) {
-    showNotification("対戦相手デッキ名を入力してください", 3600);
+  const rawName = formData.get("name")?.toString() ?? "";
+  const name = validateRequired(rawName, "対戦相手デッキ名");
+  if (name === null) {
     return;
   }
 
   try {
-    const response = await eel.register_opponent_deck({ name })();
+    const response = await callPy("register_opponent_deck", { name });
     if (handleOperationResponse(response, "対戦相手デッキを登録しました")) {
       opponentDeckForm.reset();
     }
   } catch (error) {
-    console.error("Failed to register opponent deck", error);
-    showNotification("対戦相手デッキの登録に失敗しました", 4200);
+    handleError(error, "対戦相手デッキの登録に失敗しました", {
+      context: "register_opponent_deck",
+    });
   }
 });
 
@@ -923,13 +963,14 @@ if (keywordForm) {
     }
 
     try {
-      const response = await eel.register_keyword({ name, description })();
+      const response = await callPy("register_keyword", { name, description });
       if (handleOperationResponse(response, "キーワードを登録しました")) {
         keywordForm.reset();
       }
     } catch (error) {
-      console.error("Failed to register keyword", error);
-      showNotification("キーワードの登録に失敗しました", 4200);
+      handleError(error, "キーワードの登録に失敗しました", {
+        context: "register_keyword",
+      });
     }
   });
 }
@@ -954,11 +995,10 @@ if (deckTableBody) {
     }
 
     try {
-      const response = await eel.delete_deck({ name: deckName })();
+      const response = await callPy("delete_deck", { name: deckName });
       handleOperationResponse(response, "デッキを削除しました");
     } catch (error) {
-      console.error("Failed to delete deck", error);
-      showNotification("デッキの削除に失敗しました", 4200);
+      handleError(error, "デッキの削除に失敗しました", { context: "delete_deck" });
     }
   });
 }
@@ -983,11 +1023,12 @@ if (opponentTableBody) {
     }
 
     try {
-      const response = await eel.delete_opponent_deck({ name: opponentName })();
+      const response = await callPy("delete_opponent_deck", { name: opponentName });
       handleOperationResponse(response, "対戦相手デッキを削除しました");
     } catch (error) {
-      console.error("Failed to delete opponent deck", error);
-      showNotification("対戦相手デッキの削除に失敗しました", 4200);
+      handleError(error, "対戦相手デッキの削除に失敗しました", {
+        context: "delete_opponent_deck",
+      });
     }
   });
 }
@@ -1010,11 +1051,12 @@ if (keywordTableBody) {
     }
 
     try {
-      const response = await eel.delete_keyword({ identifier: keywordId })();
+      const response = await callPy("delete_keyword", { identifier: keywordId });
       handleOperationResponse(response, "キーワードを削除しました");
     } catch (error) {
-      console.error("Failed to delete keyword", error);
-      showNotification("キーワードの削除に失敗しました", 4200);
+      handleError(error, "キーワードの削除に失敗しました", {
+        context: "delete_keyword",
+      });
     }
   });
 }
@@ -1066,13 +1108,12 @@ matchEntryForm.addEventListener("submit", async (event) => {
   };
 
   try {
-    const response = await eel.register_match(payload)();
+    const response = await callPy("register_match", payload);
     if (handleOperationResponse(response, "対戦情報を登録しました")) {
       await beginMatchEntry(matchEntryState.deckName, { pushHistory: false });
     }
   } catch (error) {
-    console.error("Failed to register match", error);
-    showNotification("対戦情報の登録に失敗しました", 4200);
+    handleError(error, "対戦情報の登録に失敗しました", { context: "register_match" });
   }
 });
 
@@ -1109,7 +1150,11 @@ if (matchEditForm) {
     }
 
     const formData = new FormData(matchEditForm);
-    const deckName = formData.get("deck_name")?.toString().trim() ?? "";
+    const deckNameRaw = formData.get("deck_name")?.toString() ?? "";
+    const deckName = validateRequired(deckNameRaw, "使用デッキ");
+    if (deckName === null) {
+      return;
+    }
     const matchNoValue = formData.get("match_no")?.toString().trim() ?? "";
     const turnValue = formData.get("turn")?.toString() ?? "";
     const opponentDeck = formData.get("opponent_deck")?.toString().trim() ?? "";
@@ -1122,11 +1167,6 @@ if (matchEditForm) {
       .map((option) => option.value)
       .filter((value) => value);
 
-    if (!deckName) {
-      showNotification("使用デッキを選択してください", 3600);
-      return;
-    }
-
     const matchNo = Number.parseInt(matchNoValue, 10);
     if (!Number.isInteger(matchNo) || matchNo <= 0) {
       showNotification("対戦番号には 1 以上の数値を入力してください", 4200);
@@ -1138,8 +1178,8 @@ if (matchEditForm) {
       return;
     }
 
-    if (!opponentDeck) {
-      showNotification("対戦相手デッキを選択してください", 3600);
+    const opponentName = validateRequired(opponentDeck, "対戦相手デッキ");
+    if (opponentName === null) {
       return;
     }
 
@@ -1153,7 +1193,7 @@ if (matchEditForm) {
       deck_name: deckName,
       match_no: matchNo,
       turn: turnValue === "first",
-      opponent_deck: opponentDeck,
+      opponent_deck: opponentName,
       keywords,
       result: Number.parseInt(resultValue, 10),
       youtube_url: youtubeUrl,
@@ -1161,14 +1201,15 @@ if (matchEditForm) {
     };
 
     try {
-      const response = await eel.update_match(payload)();
+      const response = await callPy("update_match", payload);
       if (handleOperationResponse(response, "対戦情報を更新しました")) {
         await showMatchDetail(matchId, { pushHistory: false, navigate: false });
         goBack();
       }
     } catch (error) {
-      console.error("Failed to update match", error);
-      showNotification("対戦情報の更新に失敗しました", 4200);
+      handleError(error, "対戦情報の更新に失敗しました", {
+        context: "update_match",
+      });
     }
   });
 }

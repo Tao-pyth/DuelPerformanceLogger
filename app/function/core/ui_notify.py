@@ -21,10 +21,15 @@ def notify(text: str, duration: float = 1.5) -> None:
         try:
             eel.show_notification(text, duration_ms)
             return
-        except AttributeError:  # JS side has not exposed the notification hook yet
-            logger.debug("Eel front-end has no show_notification hook; falling back to log")
-        except Exception:  # pragma: no cover - depends on runtime Eel availability
-            logger.exception("Failed to forward notification to Eel front-end")
+        except AttributeError:
+            logger.debug("Eel has no 'show_notification'; text=%r", text)
+        except (RuntimeError, ConnectionError) as exc:  # pragma: no cover - runtime specific
+            logger.warning(
+                "Eel notify failed: %s; text=%r",
+                type(exc).__name__,
+                text,
+                exc_info=True,
+            )
 
     logger.info("UI notification: %s", text)
 

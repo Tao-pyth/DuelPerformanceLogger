@@ -253,7 +253,7 @@ class DatabaseManager:
                 CREATE TABLE matches (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     match_no INTEGER NOT NULL,
-                    deck_name TEXT NOT NULL,
+                    deck_id INTEGER NOT NULL,
                     turn INTEGER NOT NULL CHECK (turn IN (0, 1)),
                     opponent_deck TEXT,
                     keywords TEXT,
@@ -261,16 +261,16 @@ class DatabaseManager:
                     youtube_url TEXT DEFAULT '',
                     favorite INTEGER NOT NULL DEFAULT 0,
                     -- 生成時刻は UTC のエポック秒
-                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    FOREIGN KEY(deck_id)
+                        REFERENCES decks(id)
+                        ON DELETE RESTRICT
+                        ON UPDATE CASCADE
                 );
 
-                -- 検索高速化：デッキ×作成時刻の複合インデックス
-                CREATE INDEX idx_matches_deck_created_at
-                    ON matches(deck_name, created_at DESC);
-
-                -- 対戦番号へのインデックス
-                CREATE INDEX idx_matches_match_no
-                    ON matches(match_no);
+                CREATE INDEX idx_matches_deck_id ON matches(deck_id);
+                CREATE INDEX idx_matches_created_at ON matches(created_at);
+                CREATE INDEX idx_matches_result ON matches(result);
                 """
             )
 
@@ -461,6 +461,8 @@ class DatabaseManager:
                     ).fetchall()
                     valid_columns = [row[1] for row in column_info]
                     insert_columns = [col for col in header if col in valid_columns]
+                    if table == "matches" and "deck_id" not in insert_columns:
+                        insert_columns.append("deck_id")
                     if not insert_columns:
                         continue
 
@@ -481,6 +483,20 @@ class DatabaseManager:
                                     row_map["turn"] = self._encode_turn(row_map["turn"])
                                 if "result" in row_map:
                                     row_map["result"] = self._encode_result(row_map["result"])
+                                deck_identifier = row_map.get("deck_id")
+                                if deck_identifier in (None, "", 0):
+                                    deck_name_value = str(row_map.get("deck_name", "") or "").strip()
+                                    deck_id = self._find_deck_id(connection, deck_name_value)
+                                    if deck_id is None:
+                                        log_error(
+                                            "Failed to resolve deck_id during import",
+                                            DatabaseError("Unknown deck name"),
+                                            deck_name=deck_name_value,
+                                        )
+                                        continue
+                                    row_map["deck_id"] = deck_id
+                                else:
+                                    row_map["deck_id"] = int(deck_identifier)
                             except ValueError as exc:
                                 log_error(
                                     "Failed to convert legacy match data during import",
@@ -531,109 +547,69 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
 
     def fetch_matches(self, deck_name: Optional[str] = None) -> list[dict[str, object]]:
-        """対戦ログを返却（デッキ名で絞り込み可能）。
+        """対戦ログを返却します。
 
         Parameters
         ----------
         deck_name: Optional[str]
-            指定された場合、そのデッキの対戦のみを返します。
+            指定された場合、その名称を持つデッキの対戦のみを返します。
+            未登録の名称が渡された場合は空配列を返却します。
         """
-        query = (
-            "SELECT id, match_no, deck_name, turn, opponent_deck, keywords, result, created_at, "
-            "youtube_url, favorite FROM matches"
-        )
-        params: Iterable[object] = ()
-        if deck_name:
-            query += " WHERE deck_name = ?"
-            params = (deck_name,)
-
-        # 生成時刻の昇順 → 同時刻の場合は id 昇順
-        query += " ORDER BY created_at ASC, id ASC"
 
         with self._connect() as connection:
             keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
-            cursor = connection.execute(query, tuple(params))
-            records: list[dict[str, object]] = []
-            for row in cursor.fetchall():
-                raw_keywords = []
-                if row["keywords"]:
-                    try:
-                        raw_keywords = json.loads(row["keywords"])
-                    except json.JSONDecodeError:
-                        raw_keywords = []
-                keyword_ids = self._sanitize_keyword_ids_from_lookup(
-                    keyword_lookup, name_lookup, raw_keywords
-                )
-                keyword_details = self._keyword_details_from_lookup(
-                    keyword_lookup, keyword_ids
-                )
-                created_at = self._format_timestamp(row["created_at"])  # ISO 8601
-                records.append(
-                    {
-                        "id": row["id"],
-                        "match_no": row["match_no"],
-                        "deck_name": row["deck_name"],
-                        "turn": self._decode_turn(row["turn"]),
-                        "opponent_deck": row["opponent_deck"] or "",
-                        "keywords": [item["name"] for item in keyword_details],
-                        "keyword_ids": keyword_ids,
-                        "keyword_details": keyword_details,
-                        "result": self._decode_result(row["result"]),
-                        "created_at": created_at,
-                        "youtube_url": row["youtube_url"] or "",
-                        "favorite": bool(row["favorite"]),
-                    }
-                )
-            return records
+            params: tuple[object, ...] = ()
+            query = (
+                "SELECT "
+                "m.id, m.match_no, m.deck_id, d.name AS deck_name, m.turn, "
+                "m.opponent_deck, m.keywords, m.result, m.created_at, "
+                "m.youtube_url, m.favorite "
+                "FROM matches AS m "
+                "JOIN decks AS d ON d.id = m.deck_id"
+            )
+
+            if deck_name:
+                deck_id = self._find_deck_id(connection, deck_name)
+                if deck_id is None:
+                    return []
+                query += " WHERE m.deck_id = ?"
+                params = (deck_id,)
+
+            query += " ORDER BY m.created_at ASC, m.id ASC"
+
+            cursor = connection.execute(query, params)
+            return [
+                self._hydrate_match_row(row, keyword_lookup, name_lookup)
+                for row in cursor.fetchall()
+            ]
 
     def fetch_last_match(self, deck_name: Optional[str] = None) -> Optional[dict[str, object]]:
         """最新の対戦ログを 1 件返却（デッキ名で絞り込み可能）。"""
         query = (
-            "SELECT id, match_no, deck_name, turn, opponent_deck, keywords, result, created_at, "
-            "youtube_url, favorite FROM matches"
+            "SELECT "
+            "m.id, m.match_no, m.deck_id, d.name AS deck_name, m.turn, "
+            "m.opponent_deck, m.keywords, m.result, m.created_at, "
+            "m.youtube_url, m.favorite "
+            "FROM matches AS m "
+            "JOIN decks AS d ON d.id = m.deck_id"
         )
-        params: Iterable[object] = ()
-        if deck_name:
-            query += " WHERE deck_name = ?"
-            params = (deck_name,)
-
-        # 新しい順に 1 件
-        query += " ORDER BY created_at DESC, id DESC LIMIT 1"
 
         with self._connect() as connection:
             keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
-            cursor = connection.execute(query, tuple(params))
+            params: tuple[object, ...] = ()
+            if deck_name:
+                deck_id = self._find_deck_id(connection, deck_name)
+                if deck_id is None:
+                    return None
+                query += " WHERE m.deck_id = ?"
+                params = (deck_id,)
+
+            query += " ORDER BY m.created_at DESC, m.id DESC LIMIT 1"
+            cursor = connection.execute(query, params)
             row = cursor.fetchone()
             if row is None:
                 return None
-
-            raw_keywords = []
-            if row["keywords"]:
-                try:
-                    raw_keywords = json.loads(row["keywords"])
-                except json.JSONDecodeError:
-                    raw_keywords = []
-            keyword_ids = self._sanitize_keyword_ids_from_lookup(
-                keyword_lookup, name_lookup, raw_keywords
-            )
-            keyword_details = self._keyword_details_from_lookup(
-                keyword_lookup, keyword_ids
-            )
-            created_at = self._format_timestamp(row["created_at"])  # ISO 8601
-            return {
-                "id": row["id"],
-                "match_no": row["match_no"],
-                "deck_name": row["deck_name"],
-                "turn": self._decode_turn(row["turn"]),
-                "opponent_deck": row["opponent_deck"] or "",
-                "keywords": [item["name"] for item in keyword_details],
-                "keyword_ids": keyword_ids,
-                "keyword_details": keyword_details,
-                "result": self._decode_result(row["result"]),
-                "created_at": created_at,
-                "youtube_url": row["youtube_url"] or "",
-                "favorite": bool(row["favorite"]),
-            }
+            return self._hydrate_match_row(row, keyword_lookup, name_lookup)
 
     def get_next_match_number(self, deck_name: Optional[str] = None) -> int:
         """指定デッキの次の対戦番号を返却。
@@ -751,9 +727,12 @@ class DatabaseManager:
             raise DatabaseError("デッキ名を指定してください")
         opponent_name = str(record.get("opponent_deck", "")).strip()
         raw_keywords = record.get("keywords") or []
+        youtube_url = str(record.get("youtube_url", "") or "").strip()
+        favorite_flag = 1 if bool(record.get("favorite")) else 0
 
         try:
             with self._connect() as connection:
+                deck_id = self._get_deck_id(connection, deck_name)
                 keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
                 filtered_keywords = [
                     str(value or "").strip()
@@ -769,26 +748,33 @@ class DatabaseManager:
                 connection.execute(
                     """
                     INSERT INTO matches (
-                        match_no, deck_name, turn, opponent_deck, keywords, result
+                        match_no,
+                        deck_id,
+                        turn,
+                        opponent_deck,
+                        keywords,
+                        result,
+                        youtube_url,
+                        favorite
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.get("match_no", 0),
-                        deck_name,
+                        deck_id,
                         turn_value,
-                        opponent_name,
+                        opponent_name if opponent_name else None,
                         keywords_json,
                         result_value,
+                        youtube_url,
+                        favorite_flag,
                     ),
                 )
 
-                cursor = connection.execute(
-                    "UPDATE decks SET usage_count = usage_count + 1 WHERE name = ?",
-                    (deck_name,),
+                connection.execute(
+                    "UPDATE decks SET usage_count = usage_count + 1 WHERE id = ?",
+                    (deck_id,),
                 )
-                if cursor.rowcount == 0:
-                    raise DatabaseError(f"デッキ「{deck_name}」が見つかりません")
 
                 if opponent_name:
                     connection.execute(
@@ -964,10 +950,21 @@ class DatabaseManager:
             keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
             cursor = connection.execute(
                 """
-                SELECT id, match_no, deck_name, turn, opponent_deck, keywords,
-                       result, created_at, youtube_url, favorite
-                FROM matches
-                WHERE id = ?
+                SELECT
+                    m.id,
+                    m.match_no,
+                    m.deck_id,
+                    d.name AS deck_name,
+                    m.turn,
+                    m.opponent_deck,
+                    m.keywords,
+                    m.result,
+                    m.created_at,
+                    m.youtube_url,
+                    m.favorite
+                FROM matches AS m
+                JOIN decks AS d ON d.id = m.deck_id
+                WHERE m.id = ?
                 """,
                 (match_id,),
             )
@@ -975,33 +972,7 @@ class DatabaseManager:
             if row is None:
                 raise DatabaseError("指定した対戦情報が見つかりません")
 
-            raw_keywords: list[object] = []
-            if row["keywords"]:
-                try:
-                    raw_keywords = json.loads(row["keywords"])
-                except json.JSONDecodeError:
-                    raw_keywords = []
-            keyword_ids = self._sanitize_keyword_ids_from_lookup(
-                keyword_lookup, name_lookup, raw_keywords
-            )
-            keyword_details = self._keyword_details_from_lookup(
-                keyword_lookup, keyword_ids
-            )
-
-            return {
-                "id": row["id"],
-                "match_no": row["match_no"],
-                "deck_name": row["deck_name"],
-                "turn": self._decode_turn(row["turn"]),
-                "opponent_deck": row["opponent_deck"] or "",
-                "result": self._decode_result(row["result"]),
-                "created_at": self._format_timestamp(row["created_at"]),
-                "youtube_url": row["youtube_url"] or "",
-                "favorite": bool(row["favorite"]),
-                "keywords": [item["name"] for item in keyword_details],
-                "keyword_ids": keyword_ids,
-                "keyword_details": keyword_details,
-            }
+            return self._hydrate_match_row(row, keyword_lookup, name_lookup)
 
     def update_match(self, match_id: int, updates: dict[str, object]) -> dict[str, object]:
         """既存の対戦ログを更新し、更新後の詳細を返却する。"""
@@ -1009,30 +980,31 @@ class DatabaseManager:
         with self.transaction() as connection:
             keyword_lookup, name_lookup = self._build_keyword_lookups(connection)
             cursor = connection.execute(
-                "SELECT * FROM matches WHERE id = ?",
+                """
+                SELECT m.*, d.name AS deck_name
+                FROM matches AS m
+                JOIN decks AS d ON d.id = m.deck_id
+                WHERE m.id = ?
+                """,
                 (match_id,),
             )
             row = cursor.fetchone()
             if row is None:
                 raise DatabaseError("指定した対戦情報が見つかりません")
 
-            old_deck = row["deck_name"]
-            new_deck = str(updates.get("deck_name", old_deck) or "").strip()
-            if not new_deck:
+            old_deck_id = int(row["deck_id"])
+            old_deck_name = row["deck_name"]
+            new_deck_name = str(updates.get("deck_name", old_deck_name) or "").strip()
+            if not new_deck_name:
                 raise DatabaseError("デッキ名を指定してください")
 
-            deck_exists = connection.execute(
-                "SELECT 1 FROM decks WHERE name = ?",
-                (new_deck,),
-            ).fetchone()
-            if deck_exists is None:
-                raise DatabaseError(f"デッキ「{new_deck}」が見つかりません")
+            new_deck_id = self._get_deck_id(connection, new_deck_name)
 
             match_no_value = updates.get("match_no", row["match_no"])
             try:
                 match_no = int(match_no_value)
-            except (TypeError, ValueError):
-                raise DatabaseError("対戦番号には数値を入力してください")
+            except (TypeError, ValueError) as exc:
+                raise DatabaseError("対戦番号には数値を入力してください") from exc
             if match_no <= 0:
                 raise DatabaseError("対戦番号には 1 以上の値を指定してください")
 
@@ -1106,7 +1078,7 @@ class DatabaseManager:
                 """
                 UPDATE matches
                 SET match_no = ?,
-                    deck_name = ?,
+                    deck_id = ?,
                     turn = ?,
                     opponent_deck = ?,
                     keywords = ?,
@@ -1117,7 +1089,7 @@ class DatabaseManager:
                 """,
                 (
                     match_no,
-                    new_deck,
+                    new_deck_id,
                     turn_value,
                     opponent_name if opponent_name else None,
                     keywords_json,
@@ -1128,7 +1100,7 @@ class DatabaseManager:
                 ),
             )
 
-            if old_deck != new_deck:
+            if old_deck_id != new_deck_id:
                 connection.execute(
                     """
                     UPDATE decks
@@ -1136,16 +1108,14 @@ class DatabaseManager:
                         WHEN usage_count > 0 THEN usage_count - 1
                         ELSE 0
                     END
-                    WHERE name = ?
+                    WHERE id = ?
                     """,
-                    (old_deck,),
+                    (old_deck_id,),
                 )
-                cursor = connection.execute(
-                    "UPDATE decks SET usage_count = usage_count + 1 WHERE name = ?",
-                    (new_deck,),
+                connection.execute(
+                    "UPDATE decks SET usage_count = usage_count + 1 WHERE id = ?",
+                    (new_deck_id,),
                 )
-                if cursor.rowcount == 0:
-                    raise DatabaseError(f"デッキ「{new_deck}」が見つかりません")
 
             if old_opponent != opponent_name:
                 if old_opponent:
@@ -1196,16 +1166,19 @@ class DatabaseManager:
         """デッキと対戦相手デッキの使用回数を対戦ログから再計算する。"""
 
         with self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE decks
-                SET usage_count = (
-                    SELECT COUNT(*)
-                    FROM matches
-                    WHERE matches.deck_name = decks.name
-                )
-                """
+            connection.execute("UPDATE decks SET usage_count = 0")
+
+            cursor = connection.execute(
+                "SELECT deck_id, COUNT(*) AS match_count FROM matches GROUP BY deck_id"
             )
+            for row in cursor.fetchall():
+                deck_id = row["deck_id"]
+                if deck_id is None:
+                    continue
+                connection.execute(
+                    "UPDATE decks SET usage_count = ? WHERE id = ?",
+                    (int(row["match_count"]), deck_id),
+                )
 
             cursor = connection.execute("SELECT name FROM opponent_decks")
             for row in cursor.fetchall():
@@ -1279,6 +1252,62 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     # 内部ユーティリティ
     # ------------------------------------------------------------------
+    def _find_deck_id(
+        self, connection: sqlite3.Connection, deck_name: str
+    ) -> Optional[int]:
+        cleaned = (deck_name or "").strip()
+        if not cleaned:
+            return None
+        cursor = connection.execute(
+            "SELECT id FROM decks WHERE name = ?",
+            (cleaned,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return int(row["id"])
+
+    def _get_deck_id(self, connection: sqlite3.Connection, deck_name: str) -> int:
+        deck_id = self._find_deck_id(connection, deck_name)
+        if deck_id is None:
+            raise DatabaseError(f"デッキ「{deck_name}」が見つかりません")
+        return deck_id
+
+    def _hydrate_match_row(
+        self,
+        row: sqlite3.Row,
+        keyword_lookup: dict[str, dict[str, object]],
+        name_lookup: dict[str, str],
+    ) -> dict[str, object]:
+        raw_keywords: list[object] = []
+        if row["keywords"]:
+            try:
+                raw_keywords = json.loads(row["keywords"])
+            except json.JSONDecodeError:
+                raw_keywords = []
+
+        keyword_ids = self._sanitize_keyword_ids_from_lookup(
+            keyword_lookup, name_lookup, raw_keywords
+        )
+        keyword_details = self._keyword_details_from_lookup(
+            keyword_lookup, keyword_ids
+        )
+
+        return {
+            "id": row["id"],
+            "match_no": row["match_no"],
+            "deck_name": row["deck_name"],
+            "turn": self._decode_turn(row["turn"]),
+            "opponent_deck": row["opponent_deck"] or "",
+            "keywords": [item["name"] for item in keyword_details],
+            "keyword_ids": keyword_ids,
+            "keyword_details": keyword_details,
+            "result": self._decode_result(row["result"]),
+            "created_at": self._format_timestamp(row["created_at"]),
+            "youtube_url": row["youtube_url"] or "",
+            "favorite": bool(row["favorite"]),
+        }
+
     def _build_keyword_lookups(
         self, connection: sqlite3.Connection
     ) -> tuple[dict[str, dict[str, object]], dict[str, str]]:
@@ -1459,7 +1488,7 @@ class DatabaseManager:
 
 
 # 将来の拡張メモ
-# - FK 強化: matches.deck_name → decks.id（数値 FK）へ移行し、ON UPDATE/DELETE CASCADE を検討
+# - FK 強化: seasons / keywords など他テーブル間の参照制約追加を検討
 # - PRAGMA 設定: WAL モード（journal_mode=WAL）や synchronous=NORMAL を運用に応じて設定
 # - user_version: スキーマバージョン管理で移行を明確化
 # - 型安全: record 引数の TypedDict/Dataclass 化、Enum 的表現（turn/result）など
