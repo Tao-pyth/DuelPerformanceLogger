@@ -9,6 +9,7 @@ This page summarises the current architecture, assets, and next steps for the Du
   - [Configuration Management](#configuration-management)
   - [Database Layer](#database-layer)
   - [Logging](#logging)
+- [Documentation Groups](#documentation-groups)
 - [Data Flow Overview](#data-flow)
 - [Existing Assets](#existing-assets)
 - [Developer Notes](#developer-notes)
@@ -47,6 +48,14 @@ This page summarises the current architecture, assets, and next steps for the Du
 
 ### <a id="logging"></a>Logging
 - `function.cmn_logger.log_error` writes timestamped entries to `%LOCALAPPDATA%/DuelPerformanceLogger/logs/app.log`, capturing stack traces and context fields.
+
+## <a id="documentation-groups"></a>Documentation Groups
+Docs フォルダは A/B/C 群で役割を分担しています。更新時には以下のショートルールに従ってください。
+
+- **A group = 基盤方針**。アーキテクチャ原則、テックスタック標準、運用ガイドラインのうち、長期で有効なものをまとめます。スキーマやログ方針などコアな変更はまず A 群を更新します。
+- **B group = 運用手順**。リリース、セキュリティ、運用系の手順書を集約します。手順変更が発生した場合は B 群の該当ページを即時更新し、履歴を残してください。
+- **C group = 改善・テンプレート**。既知の課題や提案、PR テンプレートなど短期で変化する資料を置きます。改善策が決定したら C 群にドラフトし、確定後に A/B 群へ昇格させます。
+- 変更時は `docs/docs_index.json` を更新して検索性を維持し、Wiki 側（社内 Confluence）にも同内容を同期します。更新者は `C28_Wiki_Overview.md` の末尾に日付と内容を追記し、`#dpl-docs` チャンネルで告知してください。
 
 ## <a id="data-flow"></a>Data Flow Overview
 1. UI actions create or edit decks and seasons through `DatabaseManager`, storing records in SQLite.
