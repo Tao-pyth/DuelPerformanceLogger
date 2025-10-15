@@ -23,19 +23,65 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import sqlite3
 import uuid
 from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from typing import Callable, Iterable, Iterator, Optional
 import tempfile
 import zipfile
 
 from app.function.core import paths
 
 from .cmn_logger import log_error
+
+
+_SEMVER_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+
+
+def parse_semver(ver: str) -> tuple[int, int, int]:
+    """Parse a semantic version string into a tuple of integers."""
+
+    match = _SEMVER_PATTERN.match(ver)
+    if not match:
+        raise ValueError(f"Invalid semantic version: {ver!r}")
+    major, minor, patch = match.groups()
+    return int(major), int(minor), int(patch)
+
+
+def semver_lt(a: tuple[int, int, int], b: tuple[int, int, int]) -> bool:
+    """Return True if version *a* is less than version *b*."""
+
+    return a < b
+
+
+def semver_eq(a: tuple[int, int, int], b: tuple[int, int, int]) -> bool:
+    """Return True if version *a* equals version *b*."""
+
+    return a == b
+
+
+MigrationFunc = Callable[["DatabaseManager"], None]
+MigrationStep = tuple[tuple[int, int, int], tuple[int, int, int], MigrationFunc]
+
+
+def migrate_020_to_021(db: "DatabaseManager") -> None:
+    # ここは後続タスクで実装。今は pass
+    pass
+
+
+def migrate_021_to_030(db: "DatabaseManager") -> None:
+    # 後続タスクで実実装。今は pass
+    pass
+
+
+MIGRATION_CHAIN: list[MigrationStep] = [
+    ((0, 2, 0), (0, 2, 1), migrate_020_to_021),
+    ((0, 2, 1), (0, 3, 0), migrate_021_to_030),
+]
 
 
 class DatabaseError(RuntimeError):
@@ -57,7 +103,7 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    CURRENT_SCHEMA_VERSION = "0.2.1"
+    CURRENT_SCHEMA_VERSION = "0.3.0"
     METADATA_DEFAULTS = {
         "schema_version": CURRENT_SCHEMA_VERSION,
         "ui_mode": "normal",
@@ -109,6 +155,16 @@ class DatabaseManager:
         connection.execute("PRAGMA foreign_keys = ON;")
         return connection
 
+    def _is_integrity_ok(self) -> bool:
+        """PRAGMA integrity_check の結果が ``ok`` か判定する。"""
+
+        try:
+            with self._connect() as conn:
+                row = conn.execute("PRAGMA integrity_check").fetchone()
+                return bool(row and row[0] == "ok")
+        except sqlite3.DatabaseError:
+            return False
+
     # ------------------------------------------------------------------
     # DB ライフサイクル管理
     # ------------------------------------------------------------------
@@ -121,6 +177,19 @@ class DatabaseManager:
         """DB ファイルが存在しない、またはメタデータが欠損している場合にスキーマを作成します。"""
 
         needs_initialization = False
+
+        if self._db_path.exists():
+            if not self._is_integrity_ok():
+                try:
+                    self.export_backup()
+                except Exception as exc:  # pragma: no cover - best effort logging
+                    log_error(
+                        "Failed to export backup before database reinitialization",
+                        exc,
+                        db_path=str(self._db_path),
+                    )
+                self.initialize_database()
+                # TODO: Restore data from the backup once recovery flow is implemented.
 
         if not self._db_path.exists():
             needs_initialization = True
@@ -186,6 +255,34 @@ class DatabaseManager:
             if not (0 <= int(part) <= 99):
                 return False
         return True
+
+    def migrate_semver_chain(self, current_ver_str: str, target_ver_str: str) -> str:
+        """定義済みのセマンティックバージョン遷移チェーンを順番に実行します。"""
+
+        current = parse_semver(current_ver_str)
+        target = parse_semver(target_ver_str)
+
+        while semver_lt(current, target):
+            step_to_apply: MigrationStep | None = None
+            for start_version, end_version, func in MIGRATION_CHAIN:
+                if semver_eq(start_version, current):
+                    if semver_lt(target, end_version):
+                        raise RuntimeError(
+                            "Target version is lower than migration end step"
+                        )
+                    step_to_apply = (start_version, end_version, func)
+                    break
+
+            if step_to_apply is None:
+                raise RuntimeError(
+                    f"No migration step found from v{current[0]}.{current[1]}.{current[2]}"
+                )
+
+            _, next_version, migration_func = step_to_apply
+            migration_func(self)
+            current = next_version
+
+        return f"v{current[0]}.{current[1]}.{current[2]}"
 
     @classmethod
     def normalize_schema_version(cls, value: str | int | None, fallback: str | None = None) -> str:
@@ -380,8 +477,6 @@ class DatabaseManager:
     def _migrate_schema(self) -> None:
         """スキーマの不足分を補完し、バージョン番号の整合性を保つ。"""
 
-        target_version = self.CURRENT_SCHEMA_VERSION
-        current_version = self.get_schema_version()
         schema_changed = False
 
         keyword_changed = False
@@ -489,8 +584,10 @@ class DatabaseManager:
         if keyword_changed:
             self.recalculate_keyword_usage()
 
-        if current_version != target_version:
-            self.set_schema_version(target_version)
+        current_version = self.get_schema_version()
+        target_version = f"v{self.CURRENT_SCHEMA_VERSION}"
+        reached = self.migrate_semver_chain(current_version, target_version)
+        self.set_schema_version(reached)
 
     def get_metadata(self, key: str, default: str | None = None) -> str | None:
         """Retrieve a metadata value or return *default* when absent."""
@@ -814,8 +911,10 @@ class DatabaseManager:
             return _run_query()
         except sqlite3.OperationalError as exc:
             # "no such table: matches" が原因のときだけ、自己修復して 1 回再試行
-            msg = str(exc).lower()
-            if "no such table" in msg and "matches" in msg:
+            message = " ".join(
+                str(part).lower() for part in (exc.args if exc.args else (str(exc),))
+            )
+            if "no such table" in message and "matches" in message:
                 # 不足スキーマ補完（冪等）
                 self._migrate_schema()
                 # 再試行（1回だけ）
