@@ -329,7 +329,9 @@ class DatabaseManager:
         """保存されているスキーマバージョンを取得する。"""
 
         value = self.get_metadata("schema_version")
-        return self.normalize_schema_version(value)
+        return self.normalize_schema_version(
+            value, fallback=self.CURRENT_SCHEMA_VERSION
+        )
 
     def set_schema_version(self, version: str | int) -> None:
         """スキーマバージョンを更新する。"""
