@@ -74,11 +74,16 @@ def migrate_020_to_021(db: "DatabaseManager") -> None:
 
 
 def migrate_021_to_030(db: "DatabaseManager") -> None:
-    # 後続タスクで実実装。今は pass
+    # 後続タスクで実装。今は pass
     pass
 
 
-MIGRATION_CHAIN: list[MigrationStep] = [
+def migrate_legacy_to_020(db: "DatabaseManager") -> None:
+    # 旧版→0.2.0 のベースへ。構造補完は _migrate_schema 前段で済むため実処理は不要。
+    pass
+
+MIGRATION_CHAIN = [
+    ((0, 1, 1), (0, 2, 0), migrate_legacy_to_020),
     ((0, 2, 0), (0, 2, 1), migrate_020_to_021),
     ((0, 2, 1), (0, 3, 0), migrate_021_to_030),
 ]
