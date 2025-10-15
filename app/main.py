@@ -378,6 +378,7 @@ class DuelPerformanceService:
         name: str,
         notes: str = "",
         *,
+        rank_statistics_target: bool | str | int = False,
         start_date: Optional[str] = None,
         start_time: Optional[str] = None,
         end_date: Optional[str] = None,
@@ -398,7 +399,8 @@ class DuelPerformanceService:
         処理概要
             1. シーズン名の必須チェックを実施。
             2. 日付・時刻を正規化する内部関数 ``_normalize`` を利用。
-            3. :meth:`DatabaseManager.add_season` で保存後、:meth:`refresh_state` を返します。
+            3. ランク統計対象フラグを正規化し、:meth:`DatabaseManager.add_season` で保存。
+            4. :meth:`refresh_state` を返します。
         """
         cleaned_name = (name or "").strip()
         if not cleaned_name:
@@ -408,9 +410,21 @@ class DuelPerformanceService:
             text = (value or "").strip()
             return text or None
 
+        def _normalize_flag(value: object) -> bool:
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+                return normalized in {"1", "true", "yes", "on", "t", "y"}
+            if isinstance(value, (int, float)):
+                try:
+                    return int(value) != 0
+                except (TypeError, ValueError):
+                    return False
+            return bool(value)
+
         self.db.add_season(
             cleaned_name,
             (notes or "").strip(),
+            rank_statistics_target=_normalize_flag(rank_statistics_target),
             start_date=_normalize(start_date),
             start_time=_normalize(start_time),
             end_date=_normalize(end_date),
@@ -1010,11 +1024,13 @@ def register_season(payload: dict[str, Any]) -> dict[str, Any]:
     start_time = payload.get("start_time")
     end_date = payload.get("end_date")
     end_time = payload.get("end_time")
+    rank_statistics_target = payload.get("rank_statistics_target", False)
     return _operation_response(
         service,
         lambda: service.register_season(
             name,
             notes,
+            rank_statistics_target=rank_statistics_target,
             start_date=start_date,
             start_time=start_time,
             end_date=end_date,

@@ -78,6 +78,24 @@ def migrate_021_to_030(db: "DatabaseManager") -> None:
     pass
 
 
+def migrate_030_to_031(db: "DatabaseManager") -> None:
+    """Add the rank-statistics flag to seasons for v0.3.1."""
+
+    with db.transaction() as connection:
+        if not db._table_exists(connection, "seasons"):
+            return
+        if not db._column_exists(connection, "seasons", "rank_statistics_target"):
+            connection.execute(
+                """
+                ALTER TABLE seasons
+                ADD COLUMN rank_statistics_target INTEGER NOT NULL DEFAULT 0
+                """
+            )
+        connection.execute(
+            "UPDATE seasons SET rank_statistics_target = COALESCE(rank_statistics_target, 0)"
+        )
+
+
 def migrate_legacy_to_020(db: "DatabaseManager") -> None:
     # 旧版→0.2.0 のベースへ。構造補完は _migrate_schema 前段で済むため実処理は不要。
     pass
@@ -86,6 +104,7 @@ MIGRATION_CHAIN = [
     ((0, 1, 1), (0, 2, 0), migrate_legacy_to_020),
     ((0, 2, 0), (0, 2, 1), migrate_020_to_021),
     ((0, 2, 1), (0, 3, 0), migrate_021_to_030),
+    ((0, 3, 0), (0, 3, 1), migrate_030_to_031),
 ]
 
 
@@ -108,7 +127,7 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    CURRENT_SCHEMA_VERSION = "0.3.0"
+    CURRENT_SCHEMA_VERSION = "0.3.1"
     METADATA_DEFAULTS = {
         "schema_version": CURRENT_SCHEMA_VERSION,
         "ui_mode": "normal",
@@ -391,7 +410,8 @@ class DatabaseManager:
                     start_date TEXT,
                     start_time TEXT,
                     end_date TEXT,
-                    end_time TEXT
+                    end_time TEXT,
+                    rank_statistics_target INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE opponent_decks (
@@ -531,6 +551,17 @@ class DatabaseManager:
                 )
                 connection.execute(
                     "CREATE INDEX IF NOT EXISTS idx_matches_result ON matches(result)"
+                )
+                schema_changed = True
+
+            if self._table_exists(connection, "seasons") and not self._column_exists(
+                connection, "seasons", "rank_statistics_target"
+            ):
+                connection.execute(
+                    "ALTER TABLE seasons ADD COLUMN rank_statistics_target INTEGER NOT NULL DEFAULT 0"
+                )
+                connection.execute(
+                    "UPDATE seasons SET rank_statistics_target = COALESCE(rank_statistics_target, 0)"
                 )
                 schema_changed = True
 
@@ -862,7 +893,8 @@ class DatabaseManager:
                     start_date,
                     start_time,
                     end_date,
-                    end_time
+                    end_time,
+                    COALESCE(rank_statistics_target, 0) AS rank_statistics_target
                 FROM seasons
                 ORDER BY name COLLATE NOCASE
                 """
@@ -872,6 +904,9 @@ class DatabaseManager:
                 payload = dict(row)
                 payload.setdefault("notes", payload.get("description", ""))
                 payload.pop("description", None)
+                payload["rank_statistics_target"] = bool(
+                    payload.get("rank_statistics_target", 0)
+                )
                 results.append(payload)
             return results
 
@@ -890,7 +925,9 @@ class DatabaseManager:
                 query = (
                     "SELECT "
                     "m.id, m.match_no, m.deck_id, d.name AS deck_name, "
-                    "m.season_id, s.name AS season_name, m.turn, "
+                    "m.season_id, s.name AS season_name, "
+                    "COALESCE(s.rank_statistics_target, 0) AS rank_statistics_target, "
+                    "m.turn, "
                     "m.opponent_deck, m.keywords, m.result, m.created_at, "
                     "m.youtube_url, m.favorite "
                     "FROM matches AS m "
@@ -934,7 +971,9 @@ class DatabaseManager:
         query = (
             "SELECT "
             "m.id, m.match_no, m.deck_id, d.name AS deck_name, "
-            "m.season_id, s.name AS season_name, m.turn, "
+            "m.season_id, s.name AS season_name, "
+            "COALESCE(s.rank_statistics_target, 0) AS rank_statistics_target, "
+            "m.turn, "
             "m.opponent_deck, m.keywords, m.result, m.created_at, "
             "m.youtube_url, m.favorite "
             "FROM matches AS m "
@@ -1002,22 +1041,50 @@ class DatabaseManager:
         name: str,
         notes: str = "",
         *,
+        rank_statistics_target: bool | int | str = False,
         start_date: str | None = None,
         start_time: str | None = None,
         end_date: str | None = None,
         end_time: str | None = None,
     ) -> None:
         """シーズン定義を追加。重複時は `DuplicateEntryError`。"""
+
+        def _normalize_flag(value: object) -> int:
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+                return 1 if normalized in {"1", "true", "yes", "on", "t", "y"} else 0
+            if isinstance(value, (int, float)):
+                try:
+                    return 1 if int(value) != 0 else 0
+                except (TypeError, ValueError):
+                    return 0
+            return 1 if bool(value) else 0
+
+        flag_value = _normalize_flag(rank_statistics_target)
         try:
             with self._connect() as connection:
                 connection.execute(
                     """
                     INSERT INTO seasons (
-                        name, description, start_date, start_time, end_date, end_time
+                        name,
+                        description,
+                        start_date,
+                        start_time,
+                        end_date,
+                        end_time,
+                        rank_statistics_target
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (name, notes, start_date, start_time, end_date, end_time),
+                    (
+                        name,
+                        notes,
+                        start_date,
+                        start_time,
+                        end_date,
+                        end_time,
+                        flag_value,
+                    ),
                 )
         except sqlite3.IntegrityError as exc:  # pragma: no cover - defensive
             log_error("Duplicate season insertion attempted", exc, name=name)
@@ -1324,6 +1391,7 @@ class DatabaseManager:
                     d.name AS deck_name,
                     m.season_id,
                     s.name AS season_name,
+                    COALESCE(s.rank_statistics_target, 0) AS rank_statistics_target,
                     m.turn,
                     m.opponent_deck,
                     m.keywords,
@@ -1838,6 +1906,12 @@ class DatabaseManager:
             except json.JSONDecodeError:
                 raw_keywords = []
 
+        rank_flag = (
+            bool(row["rank_statistics_target"])
+            if "rank_statistics_target" in row.keys()
+            else False
+        )
+
         keyword_ids = self._sanitize_keyword_ids_from_lookup(
             keyword_lookup, name_lookup, raw_keywords
         )
@@ -1851,6 +1925,7 @@ class DatabaseManager:
             "deck_name": row["deck_name"],
             "season_id": row["season_id"],
             "season_name": row["season_name"] or "",
+            "rank_statistics_target": rank_flag,
             "turn": self._decode_turn(row["turn"]),
             "opponent_deck": row["opponent_deck"] or "",
             "keywords": [item["name"] for item in keyword_details],
