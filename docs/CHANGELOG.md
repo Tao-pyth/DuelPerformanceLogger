@@ -7,6 +7,21 @@
 
 All notable changes to this project are documented here. Version numbers follow `DPL.<MAJOR>.<MINOR>.<PATCH>`.
 
+## [0.3.0] - 2025-10-15
+### Added
+- EN: Introduced semantic version utilities and a chained migration scaffold to coordinate schema upgrades step by step.
+- JP: セマンティックバージョンのユーティリティと逐次マイグレーションの枠組みを追加し、スキーマ更新を段階的に管理できるようにしました。
+
+### Changed
+- EN: Database initialization now verifies SQLite integrity, backs up corrupted files, and rebuilds the schema before applying defaults.
+- JP: データベース初期化時に SQLite の整合性を検証し、破損時はバックアップ退避後にスキーマを再構築してから既定値を適用するようにしました。
+- EN: Schema migrations traverse the semantic chain to reach and record the new `v0.3.0` target, and the application version strings now reflect `0.3.0`.
+- JP: マイグレーションがセマンティックチェーンを辿って新しい `v0.3.0` に到達・記録し、アプリケーションの表示バージョンも `0.3.0` に更新しました。
+
+### Fixed
+- EN: Fetching matches now retries once after running migrations when the `matches` table is missing, avoiding crashes during upgrades.
+- JP: アップグレード中に `matches` テーブルが見つからない場合でもマイグレーション後に 1 度再試行し、取得処理が落ちないようにしました。
+
 ## [0.2.1] - 2025-10-14
 ### Changed
 - EN: Enforced a database preflight during service bootstrap so migrations finish before the initial state is built.
