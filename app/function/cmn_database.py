@@ -96,6 +96,36 @@ def migrate_030_to_031(db: "DatabaseManager") -> None:
         )
 
 
+def migrate_031_to_032(db: "DatabaseManager") -> None:
+    """Introduce match memo and keyword flags for v0.3.2."""
+
+    with db.transaction() as connection:
+        if db._table_exists(connection, "matches") and not db._column_exists(
+            connection, "matches", "memo"
+        ):
+            connection.execute(
+                "ALTER TABLE matches ADD COLUMN memo TEXT NOT NULL DEFAULT ''"
+            )
+
+        if db._table_exists(connection, "keywords"):
+            if not db._column_exists(connection, "keywords", "is_protected"):
+                connection.execute(
+                    "ALTER TABLE keywords ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0"
+                )
+                connection.execute(
+                    "UPDATE keywords SET is_protected = COALESCE(is_protected, 0)"
+                )
+            if not db._column_exists(connection, "keywords", "is_hidden"):
+                connection.execute(
+                    "ALTER TABLE keywords ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0"
+                )
+                connection.execute(
+                    "UPDATE keywords SET is_hidden = COALESCE(is_hidden, 0)"
+                )
+
+        db._ensure_default_keywords(connection)
+
+
 def migrate_legacy_to_020(db: "DatabaseManager") -> None:
     # 旧版→0.2.0 のベースへ。構造補完は _migrate_schema 前段で済むため実処理は不要。
     pass
@@ -105,6 +135,7 @@ MIGRATION_CHAIN = [
     ((0, 2, 0), (0, 2, 1), migrate_020_to_021),
     ((0, 2, 1), (0, 3, 0), migrate_021_to_030),
     ((0, 3, 0), (0, 3, 1), migrate_030_to_031),
+    ((0, 3, 1), (0, 3, 2), migrate_031_to_032),
 ]
 
 
@@ -127,7 +158,7 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    CURRENT_SCHEMA_VERSION = "0.3.1"
+    CURRENT_SCHEMA_VERSION = "0.3.2"
     METADATA_DEFAULTS = {
         "schema_version": CURRENT_SCHEMA_VERSION,
         "ui_mode": "normal",
@@ -136,6 +167,15 @@ class DatabaseManager:
         "last_migration_message": "",
         "last_migration_message_at": "",
     }
+
+    DEFAULT_KEYWORDS: tuple[tuple[str, str], ...] = (
+        ("相手の増G", "相手が増Gを使用した"),
+        ("相手のうらら", "相手がはるうららを使用した"),
+        ("相手のニビル", "相手がニビルを使用した"),
+        ("相手のドロバ", "相手がドロバを使用した"),
+        ("相手の無効系誘発", "相手が何らかの無効系誘発を使用した"),
+        ("手札事故", "手札事故だった（展開に必要な初動がなかった）"),
+    )
 
     def __init__(self, db_path: Optional[Path | str] = None) -> None:
         """データベースファイルのパスと保存先ディレクトリを初期化します。
@@ -426,6 +466,8 @@ class DatabaseManager:
                     name TEXT NOT NULL UNIQUE,
                     description TEXT DEFAULT '',
                     usage_count INTEGER NOT NULL DEFAULT 0,
+                    is_protected INTEGER NOT NULL DEFAULT 0,
+                    is_hidden INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
                 );
 
@@ -437,6 +479,7 @@ class DatabaseManager:
                     turn INTEGER NOT NULL CHECK (turn IN (0, 1)),
                     opponent_deck TEXT,
                     keywords TEXT,
+                    memo TEXT NOT NULL DEFAULT '',
                     result INTEGER NOT NULL CHECK (result IN (-1, 0, 1)),
                     youtube_url TEXT DEFAULT '',
                     favorite INTEGER NOT NULL DEFAULT 0,
@@ -484,6 +527,8 @@ class DatabaseManager:
                 ("last_migration_message_at", ""),
             )
 
+            self._ensure_default_keywords(connection)
+
     # ------------------------------------------------------------------
     # メタデータ操作
     # ------------------------------------------------------------------
@@ -527,6 +572,7 @@ class DatabaseManager:
                         turn INTEGER NOT NULL CHECK (turn IN (0, 1)),
                         opponent_deck TEXT,
                         keywords TEXT,
+                        memo TEXT NOT NULL DEFAULT '',
                         result INTEGER NOT NULL CHECK (result IN (-1, 0, 1)),
                         youtube_url TEXT DEFAULT '',
                         favorite INTEGER NOT NULL DEFAULT 0,
@@ -591,11 +637,30 @@ class DatabaseManager:
                         name TEXT NOT NULL UNIQUE,
                         description TEXT DEFAULT '',
                         usage_count INTEGER NOT NULL DEFAULT 0,
+                        is_protected INTEGER NOT NULL DEFAULT 0,
+                        is_hidden INTEGER NOT NULL DEFAULT 0,
                         created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
                     )
                     """
                 )
                 keyword_changed = True
+            else:
+                if not self._column_exists(connection, "keywords", "is_protected"):
+                    connection.execute(
+                        "ALTER TABLE keywords ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0"
+                    )
+                    connection.execute(
+                        "UPDATE keywords SET is_protected = COALESCE(is_protected, 0)"
+                    )
+                    keyword_changed = True
+                if not self._column_exists(connection, "keywords", "is_hidden"):
+                    connection.execute(
+                        "ALTER TABLE keywords ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0"
+                    )
+                    connection.execute(
+                        "UPDATE keywords SET is_hidden = COALESCE(is_hidden, 0)"
+                    )
+                    keyword_changed = True
 
             if self._table_exists(connection, "matches"):
                 if not self._column_exists(connection, "matches", "season_id"):
@@ -616,6 +681,13 @@ class DatabaseManager:
                         "ALTER TABLE matches ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0"
                     )
                     schema_changed = True
+                if not self._column_exists(connection, "matches", "memo"):
+                    connection.execute(
+                        "ALTER TABLE matches ADD COLUMN memo TEXT NOT NULL DEFAULT ''"
+                    )
+                    schema_changed = True
+
+            self._ensure_default_keywords(connection)
 
         if schema_changed:
             self.recalculate_usage_counts()
@@ -928,7 +1000,7 @@ class DatabaseManager:
                     "m.season_id, s.name AS season_name, "
                     "COALESCE(s.rank_statistics_target, 0) AS rank_statistics_target, "
                     "m.turn, "
-                    "m.opponent_deck, m.keywords, m.result, m.created_at, "
+                    "m.opponent_deck, m.keywords, m.memo, m.result, m.created_at, "
                     "m.youtube_url, m.favorite "
                     "FROM matches AS m "
                     "JOIN decks AS d ON d.id = m.deck_id "
@@ -974,7 +1046,7 @@ class DatabaseManager:
             "m.season_id, s.name AS season_name, "
             "COALESCE(s.rank_statistics_target, 0) AS rank_statistics_target, "
             "m.turn, "
-            "m.opponent_deck, m.keywords, m.result, m.created_at, "
+            "m.opponent_deck, m.keywords, m.memo, m.result, m.created_at, "
             "m.youtube_url, m.favorite "
             "FROM matches AS m "
             "JOIN decks AS d ON d.id = m.deck_id "
@@ -1144,6 +1216,7 @@ class DatabaseManager:
         raw_keywords = record.get("keywords") or []
         youtube_url = str(record.get("youtube_url", "") or "").strip()
         favorite_flag = 1 if bool(record.get("favorite")) else 0
+        memo_value = str(record.get("memo", "") or "")
         season_id: Optional[int] = None
         season_input = record.get("season_id")
         season_name_input = record.get("season_name")
@@ -1186,11 +1259,12 @@ class DatabaseManager:
                         turn,
                         opponent_deck,
                         keywords,
+                        memo,
                         result,
                         youtube_url,
                         favorite
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.get("match_no", 0),
@@ -1199,6 +1273,7 @@ class DatabaseManager:
                         turn_value,
                         opponent_name if opponent_name else None,
                         keywords_json,
+                        memo_value,
                         result_value,
                         youtube_url,
                         favorite_flag,
@@ -1253,9 +1328,16 @@ class DatabaseManager:
         with self._connect() as connection:
             cursor = connection.execute(
                 """
-                SELECT identifier, name, description, usage_count, created_at
+                SELECT
+                    identifier,
+                    name,
+                    description,
+                    usage_count,
+                    created_at,
+                    is_protected,
+                    is_hidden
                 FROM keywords
-                ORDER BY name COLLATE NOCASE
+                ORDER BY is_hidden ASC, name COLLATE NOCASE
                 """
             )
             results: list[dict[str, object]] = []
@@ -1267,9 +1349,59 @@ class DatabaseManager:
                         "description": row["description"] or "",
                         "usage_count": row["usage_count"],
                         "created_at": self._format_timestamp(row["created_at"]),
+                        "is_protected": bool(row["is_protected"]) if "is_protected" in row.keys() else False,
+                        "is_hidden": bool(row["is_hidden"]) if "is_hidden" in row.keys() else False,
                     }
                 )
             return results
+
+    def ensure_default_keywords(self) -> None:
+        """Ensure that the predefined baseline keywords exist with protected flags."""
+
+        with self._connect() as connection:
+            self._ensure_default_keywords(connection)
+
+    def _ensure_default_keywords(self, connection: sqlite3.Connection) -> None:
+        """Insert or update default keywords using an open *connection*."""
+
+        if not self.DEFAULT_KEYWORDS:
+            return
+
+        for name, description in self.DEFAULT_KEYWORDS:
+            cursor = connection.execute(
+                "SELECT identifier, description FROM keywords WHERE name = ?",
+                (name,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                identifier = self._generate_keyword_identifier(connection)
+                connection.execute(
+                    """
+                    INSERT INTO keywords (
+                        identifier,
+                        name,
+                        description,
+                        usage_count,
+                        is_protected,
+                        is_hidden
+                    )
+                    VALUES (?, ?, ?, 0, 1, 0)
+                    """,
+                    (identifier, name, description),
+                )
+                continue
+
+            identifier = row["identifier"]
+            connection.execute(
+                "UPDATE keywords SET is_protected = 1, is_hidden = 0 WHERE identifier = ?",
+                (identifier,),
+            )
+            existing_description = row["description"] or ""
+            if not existing_description.strip():
+                connection.execute(
+                    "UPDATE keywords SET description = ? WHERE identifier = ?",
+                    (description, identifier),
+                )
 
     def add_opponent_deck(self, name: str) -> None:
         """対戦相手デッキ定義を追加。重複時は ``DuplicateEntryError``。"""
@@ -1323,23 +1455,45 @@ class DatabaseManager:
             log_error("Failed to delete opponent deck", exc, name=cleaned)
             raise DatabaseError("Failed to delete opponent deck") from exc
 
-    def add_keyword(self, name: str, description: str = "") -> str:
+    def add_keyword(
+        self,
+        name: str,
+        description: str = "",
+        *,
+        is_protected: bool = False,
+        is_hidden: bool = False,
+    ) -> str:
         """キーワードを追加し、生成された識別子を返却。"""
 
         cleaned_name = name.strip()
         if not cleaned_name:
             raise DatabaseError("キーワード名を入力してください")
         cleaned_description = (description or "").strip()
+        protected_flag = 1 if is_protected else 0
+        hidden_flag = 1 if is_hidden else 0
 
         try:
             with self._connect() as connection:
                 identifier = self._generate_keyword_identifier(connection)
                 connection.execute(
                     """
-                    INSERT INTO keywords (identifier, name, description, usage_count)
-                    VALUES (?, ?, ?, 0)
+                    INSERT INTO keywords (
+                        identifier,
+                        name,
+                        description,
+                        usage_count,
+                        is_protected,
+                        is_hidden
+                    )
+                    VALUES (?, ?, ?, 0, ?, ?)
                     """,
-                    (identifier, cleaned_name, cleaned_description),
+                    (
+                        identifier,
+                        cleaned_name,
+                        cleaned_description,
+                        protected_flag,
+                        hidden_flag,
+                    ),
                 )
                 return identifier
         except sqlite3.IntegrityError as exc:  # pragma: no cover - defensive
@@ -1361,12 +1515,14 @@ class DatabaseManager:
         try:
             with self._connect() as connection:
                 cursor = connection.execute(
-                    "SELECT usage_count FROM keywords WHERE identifier = ?",
+                    "SELECT usage_count, is_protected FROM keywords WHERE identifier = ?",
                     (cleaned,),
                 )
                 row = cursor.fetchone()
                 if row is None:
                     raise DatabaseError("指定したキーワードが見つかりません")
+                if "is_protected" in row.keys() and int(row["is_protected"] or 0) != 0:
+                    raise DatabaseError("このキーワードは削除できません")
                 if int(row["usage_count"] or 0) > 0:
                     raise DatabaseError("使用中のキーワードは削除できません")
                 connection.execute(
@@ -1376,6 +1532,29 @@ class DatabaseManager:
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             log_error("Failed to delete keyword", exc, identifier=cleaned)
             raise DatabaseError("Failed to delete keyword") from exc
+
+    def set_keyword_visibility(self, identifier: str, hidden: bool) -> None:
+        """Toggle the hidden flag for a keyword."""
+
+        cleaned = (identifier or "").strip()
+        if not cleaned:
+            raise DatabaseError("キーワードを指定してください")
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "SELECT 1 FROM keywords WHERE identifier = ?",
+                    (cleaned,),
+                )
+                if cursor.fetchone() is None:
+                    raise DatabaseError("指定したキーワードが見つかりません")
+                connection.execute(
+                    "UPDATE keywords SET is_hidden = ? WHERE identifier = ?",
+                    (1 if hidden else 0, cleaned),
+                )
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to update keyword visibility", exc, identifier=cleaned)
+            raise DatabaseError("Failed to update keyword visibility") from exc
 
     def fetch_match(self, match_id: int) -> dict[str, object]:
         """対戦ログ 1 件の詳細を取得する。"""
@@ -1395,6 +1574,7 @@ class DatabaseManager:
                     m.turn,
                     m.opponent_deck,
                     m.keywords,
+                    m.memo,
                     m.result,
                     m.created_at,
                     m.youtube_url,
@@ -1495,6 +1675,8 @@ class DatabaseManager:
             else:
                 favorite_flag = 1 if bool(favorite_input) else 0
 
+            memo_value = str(updates.get("memo", row["memo"] or "") or "")
+
             current_keywords_raw: list[object] = []
             if row["keywords"]:
                 try:
@@ -1543,6 +1725,7 @@ class DatabaseManager:
                     turn = ?,
                     opponent_deck = ?,
                     keywords = ?,
+                    memo = ?,
                     result = ?,
                     youtube_url = ?,
                     favorite = ?
@@ -1555,6 +1738,7 @@ class DatabaseManager:
                     turn_value,
                     opponent_name if opponent_name else None,
                     keywords_json,
+                    memo_value,
                     result_value,
                     youtube_url,
                     favorite_flag,
@@ -1931,6 +2115,7 @@ class DatabaseManager:
             "keywords": [item["name"] for item in keyword_details],
             "keyword_ids": keyword_ids,
             "keyword_details": keyword_details,
+            "memo": row["memo"] or "",
             "result": self._decode_result(row["result"]),
             "created_at": self._format_timestamp(row["created_at"]),
             "youtube_url": row["youtube_url"] or "",

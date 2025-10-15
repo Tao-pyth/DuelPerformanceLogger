@@ -303,12 +303,13 @@
                   <th scope="col">内部ID</th>
                   <th scope="col">説明</th>
                   <th scope="col">使用回数</th>
+                  <th scope="col">状態</th>
                   <th scope="col">操作</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td colspan="5" class="data-table__empty">まだデータがありません。</td>
+                  <td colspan="6" class="data-table__empty">まだデータがありません。</td>
                 </tr>
               </tbody>
             </table>
@@ -354,20 +355,17 @@
       <section class="view" data-view="match-entry" hidden>
         <div class="view__content stack match-entry-layout">
           <section class="panel match-entry-panel" aria-labelledby="match-entry-title">
-            <div class="match-entry-header">
-              <div class="match-entry-title-row">
-                <h2 id="match-entry-title">対戦情報登録</h2>
-                <div class="match-entry-meta">
-                  <span class="match-entry-meta__item">
-                    使用デッキ：<span id="match-entry-deck-name">-</span>
-                  </span>
-                  <span class="match-entry-meta__item">
-                    対戦番号：<span id="match-entry-number">-</span>
-                  </span>
-                  <span class="match-entry-meta__item">
-                    シーズン：<span id="match-entry-season">-</span>
-                  </span>
-                </div>
+            <div class="match-entry-header" id="match-entry-title">
+              <div class="match-entry-meta-grid">
+                <span class="match-entry-meta__item">
+                  使用デッキ：<span id="match-entry-deck-name">-</span>
+                </span>
+                <span class="match-entry-meta__item">
+                  対戦番号：<span id="match-entry-number">-</span>
+                </span>
+                <span class="match-entry-meta__item">
+                  シーズン：<span id="match-entry-season">-</span>
+                </span>
               </div>
             </div>
             <form id="match-entry-form" class="match-entry-form">
@@ -380,17 +378,37 @@
                   <span id="match-entry-date" class="match-entry-clock__date">(----/--/--)</span>
                 </div>
 
-                <fieldset class="match-entry-fieldset">
-                  <legend>先攻 / 後攻</legend>
-                  <div class="match-entry-options">
-                    <label class="match-entry-option">
-                      <input type="radio" name="turn" value="first" required />
-                      <span class="match-entry-option__label">先攻</span>
-                    </label>
-                    <label class="match-entry-option">
-                      <input type="radio" name="turn" value="second" required />
-                      <span class="match-entry-option__label">後攻</span>
-                    </label>
+                <fieldset class="match-entry-fieldset match-entry-fieldset--compact">
+                  <legend>先攻 / 後攻 ・ 勝敗</legend>
+                  <div class="match-entry-options-group">
+                    <span class="match-entry-sublegend">先攻 / 後攻</span>
+                    <div class="match-entry-options">
+                      <label class="match-entry-option">
+                        <input type="radio" name="turn" value="first" required />
+                        <span class="match-entry-option__label">先攻</span>
+                      </label>
+                      <label class="match-entry-option">
+                        <input type="radio" name="turn" value="second" required />
+                        <span class="match-entry-option__label">後攻</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div class="match-entry-options-group">
+                    <span class="match-entry-sublegend">勝敗</span>
+                    <div class="match-entry-options">
+                      <label class="match-entry-option">
+                        <input type="radio" name="result" value="1" required />
+                        <span class="match-entry-option__label">Win</span>
+                      </label>
+                      <label class="match-entry-option">
+                        <input type="radio" name="result" value="-1" required />
+                        <span class="match-entry-option__label">Lose</span>
+                      </label>
+                      <label class="match-entry-option">
+                        <input type="radio" name="result" value="0" required />
+                        <span class="match-entry-option__label">Draw</span>
+                      </label>
+                    </div>
                   </div>
                 </fieldset>
 
@@ -408,32 +426,28 @@
                   <datalist id="match-opponent-list"></datalist>
                 </label>
 
-                <label class="match-entry-select">
+                <div class="match-entry-select match-entry-select--keywords">
                   <span class="match-entry-select__label">対戦キーワード</span>
-                  <select id="match-keywords" name="keywords" multiple size="3">
-                    <option value="" disabled>キーワードを選択...</option>
-                  </select>
-                  <small class="match-entry-hint">Ctrl / Cmd キーで複数選択できます</small>
-                </label>
-
-                <fieldset class="match-entry-fieldset">
-                  <legend>勝敗</legend>
-                  <div class="match-entry-options">
-                    <label class="match-entry-option">
-                      <input type="radio" name="result" value="1" required />
-                      <span class="match-entry-option__label">勝ち</span>
-                    </label>
-                    <label class="match-entry-option">
-                      <input type="radio" name="result" value="-1" required />
-                      <span class="match-entry-option__label">負け</span>
-                    </label>
-                    <label class="match-entry-option">
-                      <input type="radio" name="result" value="0" required />
-                      <span class="match-entry-option__label">引き分け</span>
-                    </label>
-                  </div>
-                </fieldset>
+                  <div
+                    id="match-keywords"
+                    class="keyword-toggle-list"
+                    role="group"
+                    aria-label="対戦キーワード"
+                  ></div>
+                  <input type="hidden" id="match-keywords-input" name="keywords" />
+                  <small class="match-entry-hint">ボタンを選択してキーワードを指定できます</small>
+                </div>
               </div>
+
+              <label class="match-entry-memo">
+                <span class="match-entry-memo__label">対戦メモ</span>
+                <textarea
+                  id="match-entry-memo"
+                  name="memo"
+                  rows="3"
+                  placeholder="対戦内容や感想を入力..."
+                ></textarea>
+              </label>
 
               <div class="match-entry-actions">
                 <button type="submit" class="primary-button">対戦情報を登録</button>
@@ -511,6 +525,10 @@
                 <dd id="match-detail-keywords" class="match-detail-keywords">-</dd>
               </div>
               <div>
+                <dt>対戦メモ</dt>
+                <dd id="match-detail-memo">-</dd>
+              </div>
+              <div>
                 <dt>YouTube URL</dt>
                 <dd id="match-detail-youtube">-</dd>
               </div>
@@ -561,27 +579,43 @@
                 <span>対戦相手デッキ</span>
                 <select id="match-edit-opponent" name="opponent_deck" required></select>
               </label>
-              <label class="form-field">
+              <div class="form-field match-edit-keywords">
                 <span>対戦キーワード</span>
-                <select id="match-edit-keywords" name="keywords" multiple size="6"></select>
-              </label>
+                <div
+                  id="match-edit-keywords"
+                  class="keyword-toggle-list keyword-toggle-list--edit"
+                  role="group"
+                  aria-label="編集する対戦キーワード"
+                ></div>
+                <input type="hidden" id="match-edit-keywords-input" name="keywords" />
+                <small class="form-field__help">ボタンをクリックして選択を切り替えます</small>
+              </div>
               <fieldset class="match-entry-fieldset">
                 <legend>勝敗</legend>
                 <div class="match-entry-options">
                   <label class="match-entry-option">
                     <input type="radio" name="result" value="1" required />
-                    <span class="match-entry-option__label">勝ち</span>
+                    <span class="match-entry-option__label">Win</span>
                   </label>
                   <label class="match-entry-option">
                     <input type="radio" name="result" value="-1" required />
-                    <span class="match-entry-option__label">負け</span>
+                    <span class="match-entry-option__label">Lose</span>
                   </label>
                   <label class="match-entry-option">
                     <input type="radio" name="result" value="0" required />
-                    <span class="match-entry-option__label">引き分け</span>
+                    <span class="match-entry-option__label">Draw</span>
                   </label>
                 </div>
               </fieldset>
+              <label class="form-field">
+                <span>対戦メモ</span>
+                <textarea
+                  id="match-edit-memo"
+                  name="memo"
+                  rows="4"
+                  placeholder="対戦内容や感想を入力..."
+                ></textarea>
+              </label>
               <label class="form-field">
                 <span>対戦ログ YouTube URL</span>
                 <input type="url" id="match-edit-youtube" name="youtube_url" placeholder="https://www.youtube.com/..." />
@@ -602,8 +636,120 @@
       <section class="view" data-view="match-stats" hidden>
         <div class="view__content stack">
           <section class="panel" aria-labelledby="match-stats-title">
-            <h2 id="match-stats-title">対戦統計</h2>
-            <p class="panel__body panel__body--muted">本機能は作成中</p>
+            <h2 id="match-stats-title">統計メニュー</h2>
+            <p class="panel__body panel__body--muted">
+              デッキや対戦相手ごとのパフォーマンスを分析できるビューを選択してください。
+            </p>
+            <div class="analysis-link-grid">
+              <button type="button" class="nav-button" data-nav-target="deck-analysis">
+                デッキタイプ別分析
+              </button>
+              <button type="button" class="nav-button" data-nav-target="opponent-analysis">
+                対戦相手デッキタイプ別分析
+              </button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-view="deck-analysis" hidden>
+        <div class="view__content stack">
+          <section class="panel analysis-panel" aria-labelledby="deck-analysis-title">
+            <div class="analysis-header">
+              <div>
+                <h2 id="deck-analysis-title">デッキタイプ別分析</h2>
+                <p class="panel__body panel__body--muted">
+                  自分が使用した各デッキタイプの勝率や平均スコアを確認できます。
+                </p>
+              </div>
+              <label class="analysis-filter">
+                <span>対象シーズン</span>
+                <select id="deck-analysis-filter"></select>
+              </label>
+            </div>
+            <div class="analysis-summary" id="deck-analysis-summary"></div>
+          </section>
+          <section class="panel" aria-labelledby="deck-analysis-table-title">
+            <div class="panel__header">
+              <h3 id="deck-analysis-table-title">デッキ別指標</h3>
+            </div>
+            <table class="data-table analysis-table" id="deck-analysis-table">
+              <thead>
+                <tr>
+                  <th scope="col">デッキタイプ</th>
+                  <th scope="col">試合数</th>
+                  <th scope="col">勝ち</th>
+                  <th scope="col">負け</th>
+                  <th scope="col">引き分け</th>
+                  <th scope="col">勝率</th>
+                  <th scope="col">平均スコア</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="7" class="data-table__empty">データがありません。</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+          <section class="panel" aria-labelledby="deck-analysis-chart-title">
+            <div class="panel__header">
+              <h3 id="deck-analysis-chart-title">使用回数と勝率</h3>
+            </div>
+            <div class="analysis-chart-wrapper">
+              <canvas id="deck-analysis-chart" width="960" height="320" role="img"></canvas>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-view="opponent-analysis" hidden>
+        <div class="view__content stack">
+          <section class="panel analysis-panel" aria-labelledby="opponent-analysis-title">
+            <div class="analysis-header">
+              <div>
+                <h2 id="opponent-analysis-title">対戦相手デッキタイプ別分析</h2>
+                <p class="panel__body panel__body--muted">
+                  対戦相手のデッキごとの勝率を把握し、対策が必要な相手を確認できます。
+                </p>
+              </div>
+              <label class="analysis-filter">
+                <span>対象シーズン</span>
+                <select id="opponent-analysis-filter"></select>
+              </label>
+            </div>
+            <div class="analysis-summary" id="opponent-analysis-summary"></div>
+          </section>
+          <section class="panel" aria-labelledby="opponent-analysis-table-title">
+            <div class="panel__header">
+              <h3 id="opponent-analysis-table-title">対戦相手別指標</h3>
+            </div>
+            <table class="data-table analysis-table" id="opponent-analysis-table">
+              <thead>
+                <tr>
+                  <th scope="col">対戦相手デッキ</th>
+                  <th scope="col">試合数</th>
+                  <th scope="col">勝ち</th>
+                  <th scope="col">負け</th>
+                  <th scope="col">引き分け</th>
+                  <th scope="col">勝率</th>
+                  <th scope="col">平均スコア</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="7" class="data-table__empty">データがありません。</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+          <section class="panel" aria-labelledby="opponent-analysis-chart-title">
+            <div class="panel__header">
+              <h3 id="opponent-analysis-chart-title">対戦勝率チャート</h3>
+            </div>
+            <div class="analysis-chart-wrapper">
+              <canvas id="opponent-analysis-chart" width="960" height="320" role="img"></canvas>
+            </div>
           </section>
         </div>
       </section>

@@ -34,7 +34,9 @@ const keywordForm = document.getElementById("keyword-form");
 const keywordNameInput = document.getElementById("keyword-name");
 const keywordDescriptionInput = document.getElementById("keyword-description");
 const keywordTableBody = document.querySelector("#keyword-table tbody");
-const matchKeywordSelect = document.getElementById("match-keywords");
+const matchKeywordsContainer = document.getElementById("match-keywords");
+const matchKeywordsInput = document.getElementById("match-keywords-input");
+const matchEntryMemoInput = document.getElementById("match-entry-memo");
 const matchListTableBody = document.querySelector("#match-list-table tbody");
 const matchDetailTimestampEl = document.getElementById("match-detail-timestamp");
 const matchDetailDeckEl = document.getElementById("match-detail-deck");
@@ -44,6 +46,7 @@ const matchDetailResultEl = document.getElementById("match-detail-result");
 const matchDetailTurnEl = document.getElementById("match-detail-turn");
 const matchDetailOpponentEl = document.getElementById("match-detail-opponent");
 const matchDetailKeywordsEl = document.getElementById("match-detail-keywords");
+const matchDetailMemoEl = document.getElementById("match-detail-memo");
 const matchDetailYoutubeEl = document.getElementById("match-detail-youtube");
 const matchDetailFavoriteEl = document.getElementById("match-detail-favorite");
 const matchDetailEditButton = document.getElementById("match-detail-edit");
@@ -52,11 +55,21 @@ const matchEditDeckSelect = document.getElementById("match-edit-deck");
 const matchEditNumberInput = document.getElementById("match-edit-number");
 const matchEditOpponentSelect = document.getElementById("match-edit-opponent");
 const matchEditSeasonSelect = document.getElementById("match-edit-season");
-const matchEditKeywordsSelect = document.getElementById("match-edit-keywords");
+const matchEditKeywordsContainer = document.getElementById("match-edit-keywords");
+const matchEditKeywordsInput = document.getElementById("match-edit-keywords-input");
+const matchEditMemoInput = document.getElementById("match-edit-memo");
 const matchEditYoutubeInput = document.getElementById("match-edit-youtube");
 const matchEditFavoriteInput = document.getElementById("match-edit-favorite");
 const seasonForm = document.getElementById("season-form");
 const seasonTableBody = document.querySelector("#season-table tbody");
+const deckAnalysisFilter = document.getElementById("deck-analysis-filter");
+const deckAnalysisSummaryEl = document.getElementById("deck-analysis-summary");
+const deckAnalysisTableBody = document.querySelector("#deck-analysis-table tbody");
+const deckAnalysisChartCanvas = document.getElementById("deck-analysis-chart");
+const opponentAnalysisFilter = document.getElementById("opponent-analysis-filter");
+const opponentAnalysisSummaryEl = document.getElementById("opponent-analysis-summary");
+const opponentAnalysisTableBody = document.querySelector("#opponent-analysis-table tbody");
+const opponentAnalysisChartCanvas = document.getElementById("opponent-analysis-chart");
 
 const viewElements = new Map();
 let currentView = "dashboard";
@@ -87,6 +100,20 @@ const matchEntryState = {
 let currentMatchDetail = null;
 
 let matchEntryClockTimer = null;
+
+const keywordToggleState = {
+  entry: new Set(),
+  edit: new Set(),
+};
+
+let deckAnalysisData = [];
+let opponentAnalysisData = [];
+
+const SEASON_FILTER_ALL = "__ALL__";
+const SEASON_FILTER_RANK = "__RANK__";
+
+let deckAnalysisFilterValue = SEASON_FILTER_ALL;
+let opponentAnalysisFilterValue = SEASON_FILTER_ALL;
 
 const eelBridge = typeof window !== "undefined" ? window.eel : undefined;
 const hasEel = Boolean(eelBridge);
@@ -220,6 +247,48 @@ function formatCount(value) {
     return "0";
   }
   return numeric.toLocaleString("ja-JP");
+}
+
+function formatPercentage(value) {
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "0.0%";
+  }
+  return `${(numeric * 100).toFixed(1)}%`;
+}
+
+function formatScore(value) {
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric)) {
+    return "0.00";
+  }
+  const fixed = numeric.toFixed(2);
+  return numeric > 0 ? `+${fixed}` : fixed;
+}
+
+function parseKeywordInputValue(hiddenInput) {
+  if (!hiddenInput) {
+    return [];
+  }
+  try {
+    const raw = hiddenInput.value ? JSON.parse(hiddenInput.value) : [];
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    const seen = new Set();
+    const values = [];
+    raw.forEach((item) => {
+      const normalized = String(item ?? "").trim();
+      if (normalized && !seen.has(normalized)) {
+        seen.add(normalized);
+        values.push(normalized);
+      }
+    });
+    return values;
+  } catch (error) {
+    console.warn("Failed to parse keyword selection", error);
+    return [];
+  }
 }
 
 function formatSeasonPeriod(season) {
@@ -510,7 +579,7 @@ function renderKeywordTable(keywords) {
   if (!keywords.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 5;
+    cell.colSpan = 6;
     cell.className = "data-table__empty";
     cell.textContent = "まだデータがありません。";
     row.appendChild(cell);
@@ -537,8 +606,33 @@ function renderKeywordTable(keywords) {
     usageCell.textContent = `${formatCount(keyword.usage_count)} 回`;
     row.appendChild(usageCell);
 
+    const statusCell = document.createElement("td");
+    const states = [];
+    states.push(keyword.is_hidden ? "非表示" : "表示中");
+    if (keyword.is_protected) {
+      states.push("削除不可");
+    }
+    statusCell.textContent = states.join(" / ");
+    row.appendChild(statusCell);
+
     const actionsCell = document.createElement("td");
     actionsCell.className = "data-table__actions";
+    const toggleButton = document.createElement("button");
+    toggleButton.type = "button";
+    toggleButton.className = "icon-button";
+    toggleButton.dataset.action = "toggle-keyword-visibility";
+    toggleButton.dataset.keywordId = keyword.identifier;
+    toggleButton.dataset.hidden = keyword.is_hidden ? "1" : "0";
+    toggleButton.dataset.keywordName = keyword.name || "";
+    toggleButton.setAttribute(
+      "aria-label",
+      keyword.is_hidden
+        ? `${keyword.name} を表示する`
+        : `${keyword.name} を非表示にする`
+    );
+    toggleButton.textContent = keyword.is_hidden ? "👁️‍🗗" : "👁️";
+    actionsCell.appendChild(toggleButton);
+
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "icon-button";
@@ -547,9 +641,14 @@ function renderKeywordTable(keywords) {
     deleteButton.setAttribute("aria-label", `${keyword.name} を削除`);
     deleteButton.textContent = "🗑️";
     const usage = Number(keyword.usage_count ?? 0);
-    if (!keyword.identifier || usage > 0) {
+    if (!keyword.identifier || usage > 0 || keyword.is_protected) {
       deleteButton.disabled = true;
-      deleteButton.title = usage > 0 ? "使用中のキーワードは削除できません" : "削除できません";
+      if (keyword.is_protected) {
+        deleteButton.title = "このキーワードは削除できません";
+      } else {
+        deleteButton.title =
+          usage > 0 ? "使用中のキーワードは削除できません" : "削除できません";
+      }
     }
     actionsCell.appendChild(deleteButton);
     row.appendChild(actionsCell);
@@ -634,6 +733,458 @@ function renderMatchList(records) {
   });
 }
 
+function renderAnalysisSummary(container, data) {
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = "";
+
+  if (!data.length) {
+    container.textContent = "該当するデータがありません。";
+    return;
+  }
+
+  const totals = data.reduce(
+    (acc, item) => {
+      acc.matches += item.matchCount;
+      acc.wins += item.wins;
+      acc.losses += item.losses;
+      acc.draws += item.draws;
+      acc.scoreSum += item.scoreSum;
+      return acc;
+    },
+    { matches: 0, wins: 0, losses: 0, draws: 0, scoreSum: 0 }
+  );
+
+  const winRate = totals.matches ? totals.wins / totals.matches : 0;
+  const avgScore = totals.matches ? totals.scoreSum / totals.matches : 0;
+
+  container.innerHTML = `
+    <p>対象試合数: <strong>${formatCount(totals.matches)}</strong>（勝ち ${formatCount(
+      totals.wins
+    )} / 負け ${formatCount(totals.losses)} / 引き分け ${formatCount(
+      totals.draws
+    )}）</p>
+    <p>通算勝率: <strong>${formatPercentage(winRate)}</strong></p>
+    <p>平均スコア: <strong>${formatScore(avgScore)}</strong></p>
+  `;
+}
+
+function renderDeckAnalysisTable(data) {
+  if (!deckAnalysisTableBody) {
+    return;
+  }
+
+  deckAnalysisTableBody.innerHTML = "";
+
+  if (!data.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 7;
+    cell.className = "data-table__empty";
+    cell.textContent = "データがありません。";
+    row.appendChild(cell);
+    deckAnalysisTableBody.appendChild(row);
+    return;
+  }
+
+  data.forEach((item) => {
+    const row = document.createElement("tr");
+    const columns = [
+      item.label,
+      formatCount(item.matchCount),
+      formatCount(item.wins),
+      formatCount(item.losses),
+      formatCount(item.draws),
+      formatPercentage(item.winRate),
+      formatScore(item.avgScore),
+    ];
+    columns.forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.appendChild(cell);
+    });
+    deckAnalysisTableBody.appendChild(row);
+  });
+}
+
+function renderOpponentAnalysisTable(data) {
+  if (!opponentAnalysisTableBody) {
+    return;
+  }
+
+  opponentAnalysisTableBody.innerHTML = "";
+
+  if (!data.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 7;
+    cell.className = "data-table__empty";
+    cell.textContent = "データがありません。";
+    row.appendChild(cell);
+    opponentAnalysisTableBody.appendChild(row);
+    return;
+  }
+
+  data.forEach((item) => {
+    const row = document.createElement("tr");
+    const columns = [
+      item.label,
+      formatCount(item.matchCount),
+      formatCount(item.wins),
+      formatCount(item.losses),
+      formatCount(item.draws),
+      formatPercentage(item.winRate),
+      formatScore(item.avgScore),
+    ];
+    columns.forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.appendChild(cell);
+    });
+    opponentAnalysisTableBody.appendChild(row);
+  });
+}
+
+function renderDeckAnalysisChart(data) {
+  renderComboChart(deckAnalysisChartCanvas, data, {
+    labelKey: "label",
+    countAxisLabel: "試合数",
+    rateAxisLabel: "勝率",
+  });
+}
+
+function renderOpponentAnalysisChart(data) {
+  renderComboChart(opponentAnalysisChartCanvas, data, {
+    labelKey: "label",
+    countAxisLabel: "試合数",
+    rateAxisLabel: "勝率",
+  });
+}
+
+function renderComboChart(canvas, data, options = {}) {
+  if (!canvas) {
+    return;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return;
+  }
+
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+
+  if (!data.length) {
+    ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+    ctx.font = "16px 'Segoe UI', 'BIZ UDPGothic', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("データがありません", width / 2, height / 2);
+    return;
+  }
+
+  const leftPad = 64;
+  const rightPad = 48;
+  const topPad = 32;
+  const bottomPad = 72;
+  const chartWidth = width - leftPad - rightPad;
+  const chartHeight = height - topPad - bottomPad;
+
+  const labelKey = options.labelKey ?? "label";
+  const maxCount = Math.max(...data.map((item) => item.matchCount || 0), 1);
+  const countStep = Math.max(1, Math.ceil(maxCount / 5));
+  const scaledMaxCount = countStep * 5;
+  const countScale = chartHeight / scaledMaxCount;
+
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+  ctx.font = "12px 'Segoe UI', 'BIZ UDPGothic', sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+
+  for (let i = 0; i <= 5; i += 1) {
+    const value = countStep * i;
+    const y = topPad + chartHeight - value * countScale;
+    ctx.beginPath();
+    ctx.moveTo(leftPad, y);
+    ctx.lineTo(width - rightPad, y);
+    ctx.stroke();
+    ctx.fillText(String(value), leftPad - 8, y);
+  }
+
+  ctx.textAlign = "left";
+  for (let i = 0; i <= 4; i += 1) {
+    const ratio = i / 4;
+    const y = topPad + chartHeight - ratio * chartHeight;
+    ctx.fillText(`${Math.round(ratio * 100)}%`, width - rightPad + 8, y);
+  }
+
+  const barSpace = chartWidth / data.length;
+  const barWidth = Math.min(40, Math.max(18, barSpace * 0.5));
+  const barOffset = (barSpace - barWidth) / 2;
+
+  const barColor = options.barColor ?? "rgba(79, 141, 209, 0.72)";
+  const lineColor = options.lineColor ?? "#f6c945";
+  const points = [];
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+  ctx.font = "12px 'Segoe UI', 'BIZ UDPGothic', sans-serif";
+
+  data.forEach((item, index) => {
+    const x = leftPad + index * barSpace + barOffset;
+    const count = item.matchCount || 0;
+    const barHeight = count * countScale;
+    const y = topPad + chartHeight - barHeight;
+
+    ctx.fillStyle = barColor;
+    ctx.fillRect(x, y, barWidth, barHeight);
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.fillText(String(count), x + barWidth / 2, y - 6);
+
+    const rate = Math.max(0, Math.min(1, Number(item.winRate ?? 0)));
+    const rateY = topPad + chartHeight - rate * chartHeight;
+    points.push({ x: x + barWidth / 2, y: rateY, rate });
+
+    const label = String(item[labelKey] ?? "-");
+    ctx.save();
+    ctx.translate(x + barWidth / 2, height - bottomPad + 12);
+    ctx.rotate((-45 * Math.PI) / 180);
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+  });
+
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  points.forEach((point, index) => {
+    if (index === 0) {
+      ctx.moveTo(point.x, point.y);
+    } else {
+      ctx.lineTo(point.x, point.y);
+    }
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = lineColor;
+  points.forEach((point) => {
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = "11px 'Segoe UI', 'BIZ UDPGothic', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(formatPercentage(point.rate), point.x, point.y - 6);
+  });
+
+  ctx.font = "12px 'Segoe UI', 'BIZ UDPGothic', sans-serif";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(options.countAxisLabel ?? "試合数", leftPad, topPad - 8);
+  ctx.textAlign = "right";
+  ctx.fillText(options.rateAxisLabel ?? "勝率", width - rightPad, topPad - 8);
+}
+
+function ensureValidSeasonFilter(value, seasons) {
+  const allowed = new Set([SEASON_FILTER_ALL, SEASON_FILTER_RANK]);
+  seasons.forEach((season) => {
+    if (season && season.id != null) {
+      allowed.add(String(season.id));
+    }
+  });
+  return allowed.has(value) ? value : SEASON_FILTER_ALL;
+}
+
+function populateAnalysisFilters(seasons = []) {
+  const records = Array.isArray(seasons) ? seasons : [];
+  deckAnalysisFilterValue = ensureValidSeasonFilter(deckAnalysisFilterValue, records);
+  opponentAnalysisFilterValue = ensureValidSeasonFilter(
+    opponentAnalysisFilterValue,
+    records
+  );
+
+  const baseOptions = [
+    { value: SEASON_FILTER_ALL, label: "試合記録全体" },
+    { value: SEASON_FILTER_RANK, label: "ランク通算" },
+  ];
+
+  const seasonOptions = records.map((season) => {
+    const labelParts = [season.name || "未設定"];
+    const period = formatSeasonPeriod(season);
+    if (period && period !== "―") {
+      labelParts.push(`（${period}）`);
+    }
+    return {
+      value: String(season.id),
+      label: labelParts.join(""),
+    };
+  });
+
+  const options = [...baseOptions, ...seasonOptions];
+
+  const fill = (select, selected) => {
+    if (!select) {
+      return;
+    }
+    const current = ensureValidSeasonFilter(selected ?? SEASON_FILTER_ALL, records);
+    select.innerHTML = "";
+    options.forEach((option) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = option.value;
+      optionEl.textContent = option.label;
+      if (option.value === current) {
+        optionEl.selected = true;
+      }
+      select.appendChild(optionEl);
+    });
+    return current;
+  };
+
+  const deckValue = fill(deckAnalysisFilter, deckAnalysisFilterValue);
+  if (typeof deckValue === "string") {
+    deckAnalysisFilterValue = deckValue;
+  }
+  const opponentValue = fill(opponentAnalysisFilter, opponentAnalysisFilterValue);
+  if (typeof opponentValue === "string") {
+    opponentAnalysisFilterValue = opponentValue;
+  }
+}
+
+function filterMatchesForAnalysis(matches, filterValue) {
+  const records = Array.isArray(matches) ? matches : [];
+  if (!filterValue || filterValue === SEASON_FILTER_ALL) {
+    return records;
+  }
+  if (filterValue === SEASON_FILTER_RANK) {
+    return records.filter((match) => Boolean(match?.rank_statistics_target));
+  }
+  const seasonId = Number.parseInt(filterValue, 10);
+  if (Number.isNaN(seasonId)) {
+    return records;
+  }
+  return records.filter((match) => {
+    if (match?.season_id == null) {
+      return false;
+    }
+    const candidate = Number.parseInt(String(match.season_id), 10);
+    return !Number.isNaN(candidate) && candidate === seasonId;
+  });
+}
+
+function buildDeckAnalysisData(matches) {
+  const buckets = new Map();
+  (matches || []).forEach((match) => {
+    const label = match?.deck_name ? String(match.deck_name) : "(未設定)";
+    if (!buckets.has(label)) {
+      buckets.set(label, {
+        label,
+        matchCount: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        scoreSum: 0,
+      });
+    }
+    const bucket = buckets.get(label);
+    bucket.matchCount += 1;
+    const result = Number(match?.result ?? 0);
+    if (result > 0) {
+      bucket.wins += 1;
+    } else if (result < 0) {
+      bucket.losses += 1;
+    } else {
+      bucket.draws += 1;
+    }
+    if (Number.isFinite(result)) {
+      bucket.scoreSum += result;
+    }
+  });
+
+  return Array.from(buckets.values())
+    .map((bucket) => ({
+      ...bucket,
+      winRate: bucket.matchCount ? bucket.wins / bucket.matchCount : 0,
+      avgScore: bucket.matchCount ? bucket.scoreSum / bucket.matchCount : 0,
+    }))
+    .sort((a, b) => {
+      if (b.matchCount !== a.matchCount) {
+        return b.matchCount - a.matchCount;
+      }
+      return a.label.localeCompare(b.label, "ja");
+    });
+}
+
+function buildOpponentAnalysisData(matches) {
+  const buckets = new Map();
+  (matches || []).forEach((match) => {
+    const label = match?.opponent_deck
+      ? String(match.opponent_deck)
+      : "(未設定)";
+    if (!buckets.has(label)) {
+      buckets.set(label, {
+        label,
+        matchCount: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        scoreSum: 0,
+      });
+    }
+    const bucket = buckets.get(label);
+    bucket.matchCount += 1;
+    const result = Number(match?.result ?? 0);
+    if (result > 0) {
+      bucket.wins += 1;
+    } else if (result < 0) {
+      bucket.losses += 1;
+    } else {
+      bucket.draws += 1;
+    }
+    if (Number.isFinite(result)) {
+      bucket.scoreSum += result;
+    }
+  });
+
+  return Array.from(buckets.values())
+    .map((bucket) => ({
+      ...bucket,
+      winRate: bucket.matchCount ? bucket.wins / bucket.matchCount : 0,
+      avgScore: bucket.matchCount ? bucket.scoreSum / bucket.matchCount : 0,
+    }))
+    .sort((a, b) => {
+      if (b.matchCount !== a.matchCount) {
+        return b.matchCount - a.matchCount;
+      }
+      return a.label.localeCompare(b.label, "ja");
+    });
+}
+
+function updateDeckAnalysisView() {
+  const matches = latestSnapshot?.matches ?? [];
+  const filtered = filterMatchesForAnalysis(matches, deckAnalysisFilterValue);
+  deckAnalysisData = buildDeckAnalysisData(filtered);
+  renderAnalysisSummary(deckAnalysisSummaryEl, deckAnalysisData);
+  renderDeckAnalysisTable(deckAnalysisData);
+  renderDeckAnalysisChart(deckAnalysisData);
+}
+
+function updateOpponentAnalysisView() {
+  const matches = latestSnapshot?.matches ?? [];
+  const filtered = filterMatchesForAnalysis(matches, opponentAnalysisFilterValue);
+  opponentAnalysisData = buildOpponentAnalysisData(filtered);
+  renderAnalysisSummary(opponentAnalysisSummaryEl, opponentAnalysisData);
+  renderOpponentAnalysisTable(opponentAnalysisData);
+  renderOpponentAnalysisChart(opponentAnalysisData);
+}
+
 function renderMatchDetail(detail) {
   if (!matchDetailTimestampEl) {
     return;
@@ -652,6 +1203,10 @@ function renderMatchDetail(detail) {
     if (matchDetailKeywordsEl) {
       matchDetailKeywordsEl.innerHTML = "";
       matchDetailKeywordsEl.textContent = "-";
+    }
+    if (matchDetailMemoEl) {
+      matchDetailMemoEl.innerHTML = "";
+      matchDetailMemoEl.textContent = "-";
     }
     if (matchDetailYoutubeEl) {
       matchDetailYoutubeEl.textContent = "―";
@@ -692,6 +1247,21 @@ function renderMatchDetail(detail) {
       placeholder.dataset.empty = "true";
       placeholder.textContent = "未設定";
       matchDetailKeywordsEl.appendChild(placeholder);
+    }
+  }
+
+  if (matchDetailMemoEl) {
+    matchDetailMemoEl.innerHTML = "";
+    if (detail.memo) {
+      const lines = String(detail.memo).split(/\r?\n/);
+      lines.forEach((line, index) => {
+        if (index > 0) {
+          matchDetailMemoEl.appendChild(document.createElement("br"));
+        }
+        matchDetailMemoEl.appendChild(document.createTextNode(line));
+      });
+    } else {
+      matchDetailMemoEl.textContent = "―";
     }
   }
 
@@ -784,11 +1354,11 @@ function fillMatchEditForm(detail) {
     selectedValue: detail.opponent_deck || "",
   });
 
-  populateKeywordSelect(
-    matchEditKeywordsSelect,
-    latestSnapshot?.keywords ?? [],
-    detail.keyword_ids ?? []
-  );
+  refreshKeywordToggleList("edit", latestSnapshot?.keywords ?? [], {
+    selected: Array.isArray(detail.keyword_ids)
+      ? detail.keyword_ids.map((value) => String(value))
+      : [],
+  });
 
   const turnInputs = matchEditForm.querySelectorAll('input[name="turn"]');
   turnInputs.forEach((input) => {
@@ -806,6 +1376,10 @@ function fillMatchEditForm(detail) {
 
   if (matchEditFavoriteInput) {
     matchEditFavoriteInput.checked = Boolean(detail.favorite);
+  }
+
+  if (matchEditMemoInput) {
+    matchEditMemoInput.value = detail.memo || "";
   }
 }
 
@@ -938,27 +1512,86 @@ function populateSeasonOptions(seasons, options = {}) {
   fill(editSelect, editValue);
 }
 
-function populateKeywordSelect(select, keywords, selectedValues = []) {
-  if (!select) {
+function refreshKeywordToggleList(target, keywords, { selected } = {}) {
+  const container =
+    target === "entry" ? matchKeywordsContainer : matchEditKeywordsContainer;
+  const hiddenInput =
+    target === "entry" ? matchKeywordsInput : matchEditKeywordsInput;
+  const state = keywordToggleState[target];
+  if (!container || !hiddenInput || !state) {
     return;
   }
 
-  const desired = new Set((selectedValues ?? []).map((value) => String(value)));
-  const current = new Set(
-    Array.from(select.selectedOptions || []).map((option) => option.value)
-  );
-
-  select.innerHTML = "";
-
-  keywords.forEach((keyword) => {
-    const option = document.createElement("option");
-    option.value = keyword.identifier;
-    option.textContent = keyword.name;
-    if (desired.has(keyword.identifier) || current.has(keyword.identifier)) {
-      option.selected = true;
+  state.clear();
+  const initialValues = Array.isArray(selected)
+    ? selected
+    : (() => {
+        try {
+          const value = hiddenInput.value ? JSON.parse(hiddenInput.value) : [];
+          return Array.isArray(value) ? value : [];
+        } catch (error) {
+          return [];
+        }
+      })();
+  initialValues.forEach((value) => {
+    if (value) {
+      state.add(String(value));
     }
-    select.appendChild(option);
   });
+
+  const keywordList = Array.isArray(keywords) ? keywords : [];
+  const items = keywordList.filter((keyword) => {
+    if (!keyword) {
+      return false;
+    }
+    if (!keyword.is_hidden) {
+      return true;
+    }
+    return state.has(String(keyword.identifier));
+  });
+
+  const uniqueItems = [];
+  const seen = new Set();
+  items.forEach((keyword) => {
+    const id = String(keyword.identifier);
+    if (!seen.has(id)) {
+      uniqueItems.push(keyword);
+      seen.add(id);
+    }
+  });
+
+  container.innerHTML = "";
+  uniqueItems.forEach((keyword) => {
+    const id = String(keyword.identifier);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "keyword-toggle";
+    if (keyword.is_hidden) {
+      button.classList.add("keyword-toggle--hidden");
+      button.title = "非表示のキーワードです";
+    }
+    button.dataset.keywordId = id;
+    const selectedNow = state.has(id);
+    button.setAttribute("aria-pressed", selectedNow ? "true" : "false");
+    button.textContent = keyword.name;
+    button.addEventListener("click", () => {
+      const pressed = button.getAttribute("aria-pressed") === "true";
+      if (pressed) {
+        state.delete(id);
+        button.setAttribute("aria-pressed", "false");
+        if (keyword.is_hidden && target === "entry") {
+          button.remove();
+        }
+      } else {
+        state.add(id);
+        button.setAttribute("aria-pressed", "true");
+      }
+      hiddenInput.value = JSON.stringify(Array.from(state));
+    });
+    container.appendChild(button);
+  });
+
+  hiddenInput.value = JSON.stringify(Array.from(state));
 }
 
 function updateMatchEntryView() {
@@ -966,6 +1599,13 @@ function updateMatchEntryView() {
   matchEntryNumberEl.textContent =
     matchEntryState.matchNumber !== null ? matchEntryState.matchNumber : "-";
   matchEntryForm.reset();
+  if (matchEntryMemoInput) {
+    matchEntryMemoInput.value = "";
+  }
+  if (matchKeywordsInput) {
+    matchKeywordsInput.value = "[]";
+  }
+  keywordToggleState.entry.clear();
   const seasonLabel =
     resolveSeasonLabel(matchEntryState.seasonId) || matchEntryState.seasonName || "―";
   if (matchEntrySeasonEl) {
@@ -976,7 +1616,7 @@ function updateMatchEntryView() {
     list: matchOpponentList,
     selectedValue: "",
   });
-  populateKeywordSelect(matchKeywordSelect, latestSnapshot?.keywords ?? []);
+  refreshKeywordToggleList("entry", latestSnapshot?.keywords ?? [], { selected: [] });
 }
 
 function applySnapshot(snapshot) {
@@ -1023,15 +1663,14 @@ function applySnapshot(snapshot) {
 
   const keywordRecords = snapshot.keywords ? [...snapshot.keywords] : [];
   renderKeywordTable(keywordRecords);
-  const entryKeywordSelection = Array.from(
-    matchKeywordSelect?.selectedOptions || []
-  ).map((option) => option.value);
-  populateKeywordSelect(matchKeywordSelect, keywordRecords, entryKeywordSelection);
-  populateKeywordSelect(
-    matchEditKeywordsSelect,
-    keywordRecords,
-    currentMatchDetail?.keyword_ids ?? []
-  );
+  refreshKeywordToggleList("entry", keywordRecords, {
+    selected: Array.from(keywordToggleState.entry),
+  });
+  const editSelection =
+    currentView === "match-edit"
+      ? Array.from(keywordToggleState.edit)
+      : [];
+  refreshKeywordToggleList("edit", keywordRecords, { selected: editSelection });
 
   const seasonRecords = snapshot.seasons ? [...snapshot.seasons] : [];
   renderSeasonTable(seasonRecords);
@@ -1048,6 +1687,10 @@ function applySnapshot(snapshot) {
     select: matchEditDeckSelect,
     selectedValue: matchEditDeckSelect?.value || currentMatchDetail?.deck_name || "",
   });
+
+  populateAnalysisFilters(seasonRecords);
+  updateDeckAnalysisView();
+  updateOpponentAnalysisView();
 
   const matchRecords = snapshot.matches ? [...snapshot.matches] : [];
   matchRecords.sort((a, b) => {
@@ -1325,6 +1968,44 @@ if (opponentTableBody) {
 
 if (keywordTableBody) {
   keywordTableBody.addEventListener("click", async (event) => {
+    const toggleButton = event.target.closest(
+      "[data-action='toggle-keyword-visibility']"
+    );
+    if (toggleButton) {
+      const keywordId = toggleButton.dataset.keywordId;
+      if (!keywordId) {
+        return;
+      }
+      const hiddenFlag = toggleButton.dataset.hidden === "1";
+      try {
+        const response = await callPy("set_keyword_visibility", {
+          identifier: keywordId,
+          hidden: hiddenFlag ? 0 : 1,
+        });
+        const success = handleOperationResponse(
+          response,
+          hiddenFlag ? "キーワードを表示しました" : "キーワードを非表示にしました"
+        );
+        if (success) {
+          const nextHidden = hiddenFlag ? 0 : 1;
+          toggleButton.dataset.hidden = nextHidden ? "1" : "0";
+          const keywordName = toggleButton.dataset.keywordName || "";
+          toggleButton.textContent = nextHidden ? "👁️‍🗗" : "👁️";
+          toggleButton.setAttribute(
+            "aria-label",
+            nextHidden
+              ? `${keywordName || "キーワード"} を表示する`
+              : `${keywordName || "キーワード"} を非表示にする`
+          );
+        }
+      } catch (error) {
+        handleError(error, "キーワードの表示設定に失敗しました", {
+          context: "set_keyword_visibility",
+        });
+      }
+      return;
+    }
+
     const button = event.target.closest("[data-action='delete-keyword']");
     if (!button) {
       return;
@@ -1432,6 +2113,28 @@ matchStartForm.addEventListener("submit", async (event) => {
   });
 });
 
+if (deckAnalysisFilter) {
+  deckAnalysisFilter.addEventListener("change", (event) => {
+    const value = event.target?.value ?? SEASON_FILTER_ALL;
+    deckAnalysisFilterValue = ensureValidSeasonFilter(
+      value,
+      latestSnapshot?.seasons ?? []
+    );
+    updateDeckAnalysisView();
+  });
+}
+
+if (opponentAnalysisFilter) {
+  opponentAnalysisFilter.addEventListener("change", (event) => {
+    const value = event.target?.value ?? SEASON_FILTER_ALL;
+    opponentAnalysisFilterValue = ensureValidSeasonFilter(
+      value,
+      latestSnapshot?.seasons ?? []
+    );
+    updateOpponentAnalysisView();
+  });
+}
+
 matchEntryForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!matchEntryState.deckName) {
@@ -1443,9 +2146,8 @@ matchEntryForm.addEventListener("submit", async (event) => {
   const turnValue = formData.get("turn");
   const opponentDeck = formData.get("opponent_deck")?.toString().trim() ?? "";
   const resultValue = formData.get("result");
-  const selectedKeywords = Array.from(matchKeywordSelect?.selectedOptions || [])
-    .map((option) => option.value)
-    .filter((value) => value);
+  const selectedKeywords = parseKeywordInputValue(matchKeywordsInput);
+  const memo = formData.get("memo")?.toString() ?? "";
 
   if (!turnValue) {
     showNotification("先攻/後攻を選択してください", 3600);
@@ -1466,6 +2168,7 @@ matchEntryForm.addEventListener("submit", async (event) => {
     opponent_deck: opponentDeck,
     keywords: selectedKeywords,
     result: Number.parseInt(resultValue.toString(), 10),
+    memo,
   };
   if (matchEntryState.seasonId) {
     payload.season_id = matchEntryState.seasonId;
@@ -1719,11 +2422,8 @@ if (matchEditForm) {
     const youtubeUrl = formData.get("youtube_url")?.toString().trim() ?? "";
     const favorite = formData.get("favorite") === "on";
     const seasonIdValue = formData.get("season_id")?.toString().trim() ?? "";
-    const keywords = Array.from(
-      matchEditKeywordsSelect?.selectedOptions || []
-    )
-      .map((option) => option.value)
-      .filter((value) => value);
+    const keywords = parseKeywordInputValue(matchEditKeywordsInput);
+    const memo = formData.get("memo")?.toString() ?? "";
 
     const matchNo = Number.parseInt(matchNoValue, 10);
     if (!Number.isInteger(matchNo) || matchNo <= 0) {
@@ -1757,6 +2457,7 @@ if (matchEditForm) {
       youtube_url: youtubeUrl,
       favorite,
       season_id: seasonIdValue,
+      memo,
     };
 
     try {
