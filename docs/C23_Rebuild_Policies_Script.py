@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Documentation consistency utilities for Duel Performance Logger."""
+"""ドキュメント整合性チェックおよびインデックス生成スクリプト。
+
+記載内容
+    - Markdown 構成ファイルの有無やリンク妥当性を検証する関数群。
+    - docs_index.json の生成ロジック。
+
+想定参照元
+    - リリース前チェックや CI でのドキュメント検証。
+    - ドキュメント担当者が手動で整合性を確認する際の CLI。
+"""
 from __future__ import annotations
 
 import argparse
@@ -44,21 +53,68 @@ HEADING_PATTERN = re.compile(r"^#+\s+(.+)$", re.MULTILINE)
 
 @dataclass
 class LinkIssue:
+    """リンク検証で検出した問題点を表すデータ構造。
+
+    属性
+        source: :class:`Path`
+            問題を含む Markdown ファイルのパス。
+        target: ``str``
+            問題となったリンク文字列。
+        reason: ``str``
+            検出理由（ファイル欠如、アンカー未検出など）。
+    """
+
     source: Path
     target: str
     reason: str
 
 
 def normalise_anchor(text: str) -> str:
+    """アンカー文字列を前後の空白除去だけで正規化します。
+
+    入力
+        text: ``str``
+            アンカー候補文字列。
+    出力
+        ``str``
+            トリム済み文字列。
+    処理概要
+        1. ``strip`` を呼び出し前後の空白を削除します。
+    """
+
     return text.strip()
 
 
 def collect_markdown_files() -> List[Path]:
+    """ドキュメントルート直下の Markdown ファイル一覧を取得します。
+
+    入力
+        引数はありません。
+    出力
+        ``List[Path]``
+            ファイル名でソートした Markdown パスのリスト。
+    処理概要
+        1. ``DOC_ROOT`` 直下の ``*.md`` を収集しソートします。
+    """
+
     files = sorted(DOC_ROOT.glob("*.md"))
     return files
 
 
 def collect_anchors(path: Path) -> Set[str]:
+    """指定 Markdown 内のアンカー ID を収集します。
+
+    入力
+        path: :class:`Path`
+            解析対象の Markdown ファイル。
+    出力
+        ``Set[str]``
+            明示的な ``id`` 属性および見出しスラッグから生成したアンカー集合。
+    処理概要
+        1. HTML アンカー ``id`` を正規表現で抽出。
+        2. 見出しテキストを GitHub 互換スラッグに変換し集合へ追加します。
+    """
+
     text = path.read_text(encoding="utf-8")
     anchors: Set[str] = set()
     for match in ANCHOR_PATTERN.finditer(text):
@@ -80,6 +136,19 @@ def collect_anchors(path: Path) -> Set[str]:
 
 
 def split_link(raw_link: str) -> Tuple[str, str]:
+    """Markdown リンク文字列をパスとアンカーに分割します。
+
+    入力
+        raw_link: ``str``
+            ``[text](target#anchor)`` の ``target#anchor`` 部分。
+    出力
+        ``Tuple[str, str]``
+            (パス, アンカー)。URL やメールリンクはアンカーを空文字で返します。
+    処理概要
+        1. http/mailto/self アンカーなどの特殊ケースを判定。
+        2. ``#`` で分割し、アンカー部は :func:`normalise_anchor` を適用します。
+    """
+
     if raw_link.startswith("http://") or raw_link.startswith("https://"):
         return raw_link, ""
     if raw_link.startswith("mailto:"):
@@ -93,6 +162,19 @@ def split_link(raw_link: str) -> Tuple[str, str]:
 
 
 def check_links(files: Iterable[Path]) -> List[LinkIssue]:
+    """Markdown リンクの整合性を検査します。
+
+    入力
+        files: ``Iterable[Path]``
+            検査対象の Markdown ファイル群。
+    出力
+        ``List[LinkIssue]``
+            問題が見つかったリンク情報のリスト。
+    処理概要
+        1. 事前に各ファイルのアンカー集合を構築。
+        2. 各リンクを解析し、対象ファイルの存在とアンカーの有無を確認します。
+    """
+
     anchors: Dict[Path, Set[str]] = {
         path: collect_anchors(path) for path in files
     }
@@ -132,6 +214,19 @@ def check_links(files: Iterable[Path]) -> List[LinkIssue]:
 
 
 def generate_index(files: Iterable[Path]) -> Dict[str, List[str]]:
+    """カテゴリ別に Markdown ファイルを整列したインデックスを生成します。
+
+    入力
+        files: ``Iterable[Path]``
+            インデックス対象のファイル群。
+    出力
+        ``Dict[str, List[str]]``
+            キー ``"A"`` ``"B"`` ``"C"`` ごとにファイル名リストを格納した辞書。
+    処理概要
+        1. ``EXPECTED_ORDER`` に従い存在するファイルを抽出。
+        2. ファイル名の接頭辞でカテゴリを判定し辞書へ格納します。
+    """
+
     ordered = [name for name in EXPECTED_ORDER if (DOC_ROOT / name).exists()]
     groups: Dict[str, List[str]] = {"A": [], "B": [], "C": []}
     for name in ordered:
@@ -145,10 +240,35 @@ def generate_index(files: Iterable[Path]) -> Dict[str, List[str]]:
 
 
 def write_index(groups: Dict[str, List[str]]) -> None:
+    """インデックス情報を ``docs_index.json`` に書き出します。
+
+    入力
+        groups: ``Dict[str, List[str]]``
+            :func:`generate_index` が返すカテゴリ別ファイル名辞書。
+    出力
+        ``None``
+            ファイルへ書き込むのみです。
+    処理概要
+        1. ``json.dumps`` で整形し ``INDEX_PATH`` へ保存します。
+    """
+
     INDEX_PATH.write_text(json.dumps(groups, indent=2) + "\n", encoding="utf-8")
 
 
 def check_expected_files(markdown_files: Iterable[Path]) -> List[str]:
+    """期待する Markdown ファイルの有無を検証します。
+
+    入力
+        markdown_files: ``Iterable[Path]``
+            実際に存在する Markdown ファイル群。
+    出力
+        ``List[str]``
+            欠落ファイルや余剰ファイルを説明するメッセージリスト。
+    処理概要
+        1. 実在ファイルの集合を作成。
+        2. ``EXPECTED_ORDER`` と比較し不足・過剰をメッセージ化します。
+    """
+
     actual_names = {path.name for path in markdown_files}
     missing = [name for name in EXPECTED_ORDER if name not in actual_names]
     orphaned = sorted(name for name in actual_names if name not in EXPECTED_ORDER)
@@ -161,6 +281,17 @@ def check_expected_files(markdown_files: Iterable[Path]) -> List[str]:
 
 
 def ensure_logging_section() -> bool:
+    """ロギング戦略ドキュメントに特定セクションがあるか確認します。
+
+    入力
+        引数はありません。
+    出力
+        ``bool``
+            ``True``: セクションが存在。``False``: 欠如またはファイルなし。
+    処理概要
+        1. ``A06_Logging_Strategy.md`` を読み込み ``Monitoring & Telemetry`` を検索します。
+    """
+
     path = DOC_ROOT / "A06_Logging_Strategy.md"
     if not path.exists():
         return False
@@ -169,6 +300,19 @@ def ensure_logging_section() -> bool:
 
 
 def run_consistency_check(update_index: bool) -> int:
+    """ドキュメント整合性チェックを実行し終了コードを返します。
+
+    入力
+        update_index: ``bool``
+            ``True`` の場合は docs_index.json を更新します。
+    出力
+        ``int``
+            正常終了は ``0``、何らかの問題を検出した場合は ``1``。
+    処理概要
+        1. Markdown 構造、リンク、必須セクションの順に検証。
+        2. 問題があればレポートを表示し 1、なければ 0 を返します。
+    """
+
     markdown_files = collect_markdown_files()
     doc_files: List[Path] = list(markdown_files)
     script_path = DOC_ROOT / "C23_Rebuild_Policies_Script.py"
@@ -204,6 +348,17 @@ def run_consistency_check(update_index: bool) -> int:
 
 
 def parse_args() -> argparse.Namespace:
+    """コマンドライン引数を解析します。
+
+    入力
+        引数はありません。
+    出力
+        :class:`argparse.Namespace`
+            利用可能なフラグ ``check_consistency`` と ``write_index`` を含む解析結果。
+    処理概要
+        1. ``argparse.ArgumentParser`` を構築し、想定されるオプションを登録します。
+    """
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check-consistency",
@@ -219,6 +374,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """CLI エントリーポイント。整合性チェックを実行します。
+
+    入力
+        引数はありません。
+    出力
+        ``None``
+            プロセス終了コードとして ``sys.exit`` を使用します。
+    処理概要
+        1. 引数を解析し ``--check-consistency`` が指定されているか確認します。
+        2. 必要に応じて :func:`run_consistency_check` を実行し終了コードで終了します。
+    """
+
     args = parse_args()
     if not args.check_consistency:
         print("No action specified. Use --check-consistency.")

@@ -1,3 +1,8 @@
+# HotFix_20251015
+### Changed
+- EN: Expanded module/class/function documentation across the Python codebase to guide new engineers and refreshed the changelog.
+- JP: Python コード全体のモジュール/クラス/メソッド解説コメントを拡充し、新人エンジニア向けの概要設計資料として整備しました。
+
 # Duel Performance Logger - Changelog
 
 All notable changes to this project are documented here. Version numbers follow `DPL.<MAJOR>.<MINOR>.<PATCH>`.

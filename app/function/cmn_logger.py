@@ -1,4 +1,13 @@
-"""Common logging utilities used across the application."""
+"""アプリ全体で共通利用するログ出力ユーティリティ。
+
+記載内容
+    - :func:`log_error`: 任意のエラー情報をテキストログへ記録。
+    - :func:`log_db_error`: データベース関連エラーのラッパー。
+
+想定参照元
+    - :mod:`app.main` や :mod:`app.function.cmn_database` の例外ハンドリング部分。
+    - 障害調査用スクリプトからの直接利用。
+"""
 
 from __future__ import annotations
 
@@ -17,7 +26,22 @@ _LOG_DIR = paths.log_dir()
 
 
 def log_error(message: str, exc: BaseException | None = None, **context: Any) -> Path:
-    """Write a detailed error log entry and return the written file path."""
+    """詳細なエラーログを出力しファイルパスを返します。
+
+    入力
+        message: ``str``
+            ログ行に残したいメッセージ。
+        exc: ``BaseException | None``
+            例外オブジェクト。指定時はトレースバックを記録します。
+        **context: ``Any``
+            追加で残したい情報。``key=value`` 形式で整形されます。
+    出力
+        ``Path``
+            追記されたログファイルのパス。
+    処理概要
+        1. 日付単位でログファイルを切り替え、ヘッダー行・コンテキスト・トレースバックを書き込みます。
+        2. 最終的にログファイルパスを返却します。
+    """
 
     # 日付単位でログファイルを分ける。例: 20240101.log
     timestamp = datetime.now()
@@ -45,7 +69,21 @@ def log_error(message: str, exc: BaseException | None = None, **context: Any) ->
 
 
 def log_db_error(context: str, exc: Exception | None = None, **info: Any) -> Path:
-    """Persist database error details to the log folder."""
+    """データベースエラーの詳細をログに記録します。
+
+    入力
+        context: ``str``
+            エラー発生箇所や状況を表すメッセージ。
+        exc: ``Exception | None``
+            捕捉した例外。任意。
+        **info: ``Any``
+            補足情報を ``key=value`` で記録。
+    出力
+        ``Path``
+            記録先ファイルのパス。
+    処理概要
+        1. :func:`log_error` を呼び出しデータベース固有の情報も含めて記録します。
+    """
 
     # DB 関連のエラーでも基本的な処理は `log_error` と同じなのでラップする。
     return log_error(context, exc, **info)
