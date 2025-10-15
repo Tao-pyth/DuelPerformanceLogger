@@ -146,6 +146,12 @@ body {
   font-size: 0.95rem;
 }
 
+.form-field__help {
+  margin: -12px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .form-field--inline {
   flex-direction: row;
   align-items: center;

@@ -189,6 +189,18 @@
                 <span>備考</span>
                 <textarea id="season-notes" name="notes" rows="3" maxlength="400"></textarea>
               </label>
+              <label class="form-field form-field--inline">
+                <span>ランク統計対象</span>
+                <input
+                  type="checkbox"
+                  id="season-rank-target"
+                  name="rank_statistics_target"
+                  value="1"
+                />
+              </label>
+              <p class="form-field__help">
+                チェックしたシーズンの対戦のみ直近対戦記録に表示されます。
+              </p>
               <div class="form-actions">
                 <button type="submit" class="primary-button">登録する</button>
               </div>
@@ -202,13 +214,14 @@
                 <tr>
                   <th scope="col">シーズン名</th>
                   <th scope="col">期間</th>
+                  <th scope="col">ランク統計対象</th>
                   <th scope="col">備考</th>
                   <th scope="col">操作</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td colspan="4" class="data-table__empty">まだデータがありません。</td>
+                  <td colspan="5" class="data-table__empty">まだデータがありません。</td>
                 </tr>
               </tbody>
             </table>

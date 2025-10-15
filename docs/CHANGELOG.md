@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. Version numbers follow `DPL.<MAJOR>.<MINOR>.<PATCH>`.
 
+## [0.3.1] - 2025-10-16
+### Added
+- EN: Seasons can now be registered with a "Rank Statistics" flag so only competitive data is tracked for analytics.
+- JP: シーズン登録時に「ランク統計対象」フラグを設定できるようにし、ランク戦データのみを分析対象として扱えるようにしました。
+
+### Changed
+- EN: The dashboard's recent match list now filters to seasons marked for rank statistics, and the schema migration adds the supporting column.
+- JP: ダッシュボードの直近対戦記録はランク統計対象シーズンの対戦だけを表示し、スキーママイグレーションで対応カラムを追加しました。
+
 ## [0.3.0] - 2025-10-15
 ### Added
 - EN: Introduced semantic version utilities and a chained migration scaffold to coordinate schema upgrades step by step.

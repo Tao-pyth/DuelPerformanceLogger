@@ -314,7 +314,7 @@ function renderMatches(matches) {
     const cell = document.createElement("td");
     cell.colSpan = 6;
     cell.className = "data-table__empty";
-    cell.textContent = "まだデータがありません。";
+    cell.textContent = "ランク統計対象の対戦がまだ登録されていません。";
     row.appendChild(cell);
     matchesTableBody.appendChild(row);
     return;
@@ -457,7 +457,7 @@ function renderSeasonTable(records) {
   if (!records.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 4;
+    cell.colSpan = 5;
     cell.className = "data-table__empty";
     cell.textContent = "まだデータがありません。";
     row.appendChild(cell);
@@ -475,6 +475,10 @@ function renderSeasonTable(records) {
     const periodCell = document.createElement("td");
     periodCell.textContent = formatSeasonPeriod(season);
     row.appendChild(periodCell);
+
+    const rankCell = document.createElement("td");
+    rankCell.textContent = season.rank_statistics_target ? "対象" : "対象外";
+    row.appendChild(rankCell);
 
     const notesCell = document.createElement("td");
     notesCell.textContent = season.notes ? season.notes : "―";
@@ -993,7 +997,10 @@ function applySnapshot(snapshot) {
     }
     return a.created_at > b.created_at ? 1 : -1;
   });
-  renderMatches(records.slice(-10).reverse());
+  const rankMatches = records.filter((record) =>
+    Boolean(record.rank_statistics_target)
+  );
+  renderMatches(rankMatches.slice(-10).reverse());
 
   const deckRecords = snapshot.decks ? [...snapshot.decks] : [];
   renderDeckTable(deckRecords);
@@ -1361,6 +1368,7 @@ if (seasonForm) {
       start_time: formData.get("start_time")?.toString() ?? "",
       end_date: formData.get("end_date")?.toString() ?? "",
       end_time: formData.get("end_time")?.toString() ?? "",
+      rank_statistics_target: formData.has("rank_statistics_target"),
     };
 
     try {
