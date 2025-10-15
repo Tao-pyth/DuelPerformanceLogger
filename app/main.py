@@ -265,6 +265,7 @@ class DuelPerformanceService:
                 candidate = str(value or "").strip()
                 if candidate:
                     keywords.append(candidate)
+        memo = str(payload.get("memo", "") or "")
         season_id_value = payload.get("season_id")
         season_name = str(payload.get("season_name", "") or "").strip()
         normalized_season_id: Optional[int] = None
@@ -281,6 +282,7 @@ class DuelPerformanceService:
             "turn": bool(turn),
             "opponent_deck": opponent,
             "keywords": keywords,
+            "memo": memo,
             "result": int(result),
             "season_id": normalized_season_id,
         }
@@ -371,6 +373,15 @@ class DuelPerformanceService:
         if not cleaned:
             raise ValueError("削除するキーワードを選択してください")
         self.db.delete_keyword(cleaned)
+        return self.refresh_state()
+
+    def set_keyword_visibility(self, identifier: str, hidden: bool) -> AppState:
+        """キーワードの表示状態を切り替えて状態を更新します。"""
+
+        cleaned = (identifier or "").strip()
+        if not cleaned:
+            raise ValueError("キーワードを選択してください")
+        self.db.set_keyword_visibility(cleaned, hidden)
         return self.refresh_state()
 
     def register_season(
@@ -1000,6 +1011,23 @@ def delete_keyword(payload: dict[str, Any]) -> dict[str, Any]:
     service = _ensure_service()
     identifier = str(payload.get("identifier", "")) if payload else ""
     return _operation_response(service, lambda: service.delete_keyword(identifier))
+
+
+@eel.expose
+def set_keyword_visibility(payload: dict[str, Any]) -> dict[str, Any]:
+    """キーワードの表示・非表示切り替えを処理します。"""
+
+    service = _ensure_service()
+    identifier = str(payload.get("identifier", "")) if payload else ""
+    hidden_value = payload.get("hidden", False) if payload else False
+    if isinstance(hidden_value, str):
+        normalized = hidden_value.strip().lower()
+        hidden_flag = normalized in {"1", "true", "yes", "on", "hidden"}
+    else:
+        hidden_flag = bool(hidden_value)
+    return _operation_response(
+        service, lambda: service.set_keyword_visibility(identifier, hidden_flag)
+    )
 
 
 @eel.expose

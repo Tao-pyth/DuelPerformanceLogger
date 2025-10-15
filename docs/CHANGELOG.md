@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. Version numbers follow `DPL.<MAJOR>.<MINOR>.<PATCH>`.
 
+## [0.3.2] - 2025-10-17
+### Added
+- EN: Users can record per-match memos from entry and edit screens and review them in the match detail view for later reference.
+- JP: 対戦情報の登録・編集画面でメモを入力し、詳細画面で確認できる対戦メモ機能を追加しました。
+- EN: Added deck and opponent deck analysis dashboards with season filters, rank totals, and combined charts for usage counts and win rates.
+- JP: デッキタイプ別・対戦相手デッキタイプ別の分析画面を追加し、シーズンフィルターや使用数/勝率の複合グラフを実装しました。
+
+### Changed
+- EN: Seeded protected default keywords, introduced visibility toggles, and refreshed the match entry layout with compact controls and keyword buttons.
+- JP: 削除不可の初期キーワードを自動登録し、表示切替ボタンを備えたキーワード管理と対戦登録レイアウトの再構成を行いました。
+- EN: Bumped the schema/application version to 0.3.2 and extended migrations to add the match memo column and keyword flags.
+- JP: マイグレーションに対戦メモ列とキーワードフラグを追加し、スキーマおよびアプリケーションのバージョンを 0.3.2 に更新しました。
+
 ## [0.3.1] - 2025-10-16
 ### Added
 - EN: Seasons can now be registered with a "Rank Statistics" flag so only competitive data is tracked for analytics.
