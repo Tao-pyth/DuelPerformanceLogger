@@ -1,4 +1,13 @@
-"""Utility helpers for loading localized resources from JSON files."""
+"""ローカライズ文字列リソースを読み込むユーティリティ群。
+
+記載内容
+    - :func:`get_text`: UI テキストをキーで検索する公開 API。
+    - 内部キャッシュ関数 :func:`_load_strings`。
+
+想定参照元
+    - :mod:`app.main` など、UI 文言を動的に取得するサービス層。
+    - 将来的なバッチやテストで文字列存在チェックを行う処理。
+"""
 
 from __future__ import annotations
 
@@ -20,7 +29,17 @@ _STRINGS_PATH = paths.strings_path()
 
 @lru_cache(maxsize=1)
 def _load_strings() -> dict[str, Any]:
-    """Load and cache the string resources from disk."""
+    """文字列リソースを読み込みキャッシュします。
+
+    入力
+        引数はありません。
+    出力
+        ``dict[str, Any]``
+            JSON ファイルを辞書化したデータ。
+    処理概要
+        1. ``strings.json`` を開き JSON を読み込みます。
+        2. ``lru_cache`` により 1 度読み込んだ内容を保持します。
+    """
 
     # `lru_cache` を使うことで 1 度読み込んだ JSON をメモリに保持し、
     # 毎回ディスクへアクセスするコストを削減している。
@@ -29,7 +48,20 @@ def _load_strings() -> dict[str, Any]:
 
 
 def get_text(path: str, default: Any | None = None) -> Any:
-    """Retrieve a value from the string resources by dotted path."""
+    """ドット記法で指定した文字列リソースを取得します。
+
+    入力
+        path: ``str``
+            ``"settings.title"`` のようなドット区切りのキー。
+        default: ``Any | None``
+            見つからない場合に返す既定値。未指定時はパス文字列を返します。
+    出力
+        ``Any``
+            該当する値。文字列が基本ですがネストされた辞書/配列も返る可能性があります。
+    処理概要
+        1. :func:`_load_strings` の結果をたどり ``path`` を段階的に探索。
+        2. 見つからない場合は ``default`` もしくはパス文字列を返却します。
+    """
 
     # `path` に `.` 区切りで指定されたキーを辿り、対応する値を返す。
     data: Any = _load_strings()

@@ -68,6 +68,18 @@ class DatabaseManager:
     }
 
     def __init__(self, db_path: Optional[Path | str] = None) -> None:
+        """データベースファイルのパスと保存先ディレクトリを初期化します。
+
+        入力
+            db_path: ``Optional[Path | str]``
+                明示的に DB パスを指定する場合に利用。未指定なら規定位置を利用します。
+        出力
+            ``None``
+                副作用として保存先ディレクトリを作成します。
+        処理概要
+            1. 引数または規定ディレクトリから DB ファイルパスを決定。
+            2. 親ディレクトリを作成し、以降の接続に備えます。
+        """
         # プロジェクト標準のユーザーデータディレクトリ配下へ DB を配置する。
         base_dir = paths.database_dir()
         if db_path is None:
@@ -135,6 +147,17 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     @staticmethod
     def _int_to_semver(value: int) -> str:
+        """整数値を ``MAJOR.MINOR.PATCH`` 形式へ変換します。
+
+        入力
+            value: ``int``
+                スキーマバージョンを整数で表した値。
+        出力
+            ``str``
+                ``0.0.0`` のようなセマンティックバージョン文字列。
+        処理概要
+            1. 値を 0 以上へ補正し、1 万/100/1 の位で分割します。
+        """
         safe_value = max(int(value), 0)
         major = safe_value // 10000
         minor = (safe_value // 100) % 100
@@ -143,6 +166,17 @@ class DatabaseManager:
 
     @staticmethod
     def _is_semver(candidate: str) -> bool:
+        """文字列が ``X.Y.Z`` 形式のセマンティックバージョンか判定します。
+
+        入力
+            candidate: ``str``
+                判定対象文字列。
+        出力
+            ``bool``
+                正しい形式なら ``True``。
+        処理概要
+            1. ``.`` で 3 要素に分割し、それぞれが 0〜99 の数字か確認します。
+        """
         parts = candidate.split(".")
         if len(parts) != 3:
             return False
@@ -155,6 +189,21 @@ class DatabaseManager:
 
     @classmethod
     def normalize_schema_version(cls, value: str | int | None, fallback: str | None = None) -> str:
+        """スキーマバージョン表記を正規化します。
+
+        入力
+            value: ``str | int | None``
+                正規化対象値。整数や文字列を許容します。
+            fallback: ``str | None``
+                正規化できなかった場合に使用する既定値。
+        出力
+            ``str``
+                正規化されたバージョン文字列。
+        処理概要
+            1. 整数の場合は :meth:`_int_to_semver` で変換。
+            2. 文字列の場合はトリムしてセマンティック形式か整数かを判定します。
+            3. いずれも判定できなければ ``fallback`` を返します。
+        """
         if fallback is None:
             fallback = "0.0.0"
 
@@ -468,13 +517,46 @@ class DatabaseManager:
             )
 
     def get_ui_mode(self, default: str = "normal") -> str:
+        """UI 表示モードの設定値を取得します。
+
+        入力
+            default: ``str``
+                メタデータ未設定時に返す既定値。
+        出力
+            ``str``
+                現在記録されている UI モード。
+        処理概要
+            1. :meth:`get_metadata` から ``ui_mode`` を読み込み、空なら ``default`` を返します。
+        """
         value = self.get_metadata("ui_mode", default) or default
         return value
 
     def set_ui_mode(self, mode: str) -> None:
+        """UI 表示モードをメタデータへ保存します。
+
+        入力
+            mode: ``str``
+                設定したいモード文字列。
+        出力
+            ``None``
+                副作用として ``ui_mode`` メタデータが更新されます。
+        処理概要
+            1. :meth:`set_metadata` を利用し値を保存します。
+        """
         self.set_metadata("ui_mode", mode)
 
     def record_backup_path(self, path: Path | str) -> None:
+        """最新バックアップの保存先パスを記録します。
+
+        入力
+            path: ``Path | str``
+                バックアップディレクトリまたはファイルのパス。
+        出力
+            ``None``
+                副作用として ``last_backup`` メタデータが更新されます。
+        処理概要
+            1. 文字列化したパスを :meth:`set_metadata` で保存します。
+        """
         self.set_metadata("last_backup", str(path))
 
     # ------------------------------------------------------------------
@@ -1527,6 +1609,20 @@ class DatabaseManager:
     def _find_deck_id(
         self, connection: sqlite3.Connection, deck_name: str
     ) -> Optional[int]:
+        """デッキ名から ID を検索します。
+
+        入力
+            connection: ``sqlite3.Connection``
+                クエリ実行に用いるコネクション。
+            deck_name: ``str``
+                検索するデッキ名。
+        出力
+            ``Optional[int]``
+                該当 ID。存在しない場合は ``None``。
+        処理概要
+            1. 名前をトリムし空なら ``None``。
+            2. ``decks`` テーブルから該当 ID を取得します。
+        """
         cleaned = (deck_name or "").strip()
         if not cleaned:
             return None
@@ -1540,6 +1636,19 @@ class DatabaseManager:
         return int(row["id"])
 
     def _get_deck_id(self, connection: sqlite3.Connection, deck_name: str) -> int:
+        """デッキ名から ID を取得し、見つからない場合は例外を送出します。
+
+        入力
+            connection: ``sqlite3.Connection``
+                クエリ用コネクション。
+            deck_name: ``str``
+                対象デッキ名。
+        出力
+            ``int``
+                取得したデッキ ID。
+        処理概要
+            1. :meth:`_find_deck_id` で検索し、存在しなければ :class:`DatabaseError` を送出します。
+        """
         deck_id = self._find_deck_id(connection, deck_name)
         if deck_id is None:
             raise DatabaseError(f"デッキ「{deck_name}」が見つかりません")
@@ -1548,6 +1657,20 @@ class DatabaseManager:
     def _find_season_id(
         self, connection: sqlite3.Connection, season_name: str
     ) -> Optional[int]:
+        """シーズン名から ID を検索します。
+
+        入力
+            connection: ``sqlite3.Connection``
+                クエリ用コネクション。
+            season_name: ``str``
+                検索するシーズン名。
+        出力
+            ``Optional[int]``
+                見つかった ID。存在しなければ ``None``。
+        処理概要
+            1. 名前をトリムし空なら ``None``。
+            2. ``seasons`` テーブルから ID を取得します。
+        """
         cleaned = (season_name or "").strip()
         if not cleaned:
             return None
@@ -1561,6 +1684,20 @@ class DatabaseManager:
         return int(row["id"])
 
     def _get_season_id(self, connection: sqlite3.Connection, season_name: str) -> int:
+        """シーズン名から ID を取得し、存在しない場合は例外を送出します。
+
+        入力
+            connection: ``sqlite3.Connection``
+                クエリ用コネクション。
+            season_name: ``str``
+                対象シーズン名。
+        出力
+            ``int``
+                シーズン ID。
+        処理概要
+            1. :meth:`_find_season_id` を利用して ID を取得。
+            2. 未登録の場合は :class:`DatabaseError` を送出します。
+        """
         season_id = self._find_season_id(connection, season_name)
         if season_id is None:
             raise DatabaseError(f"シーズン「{season_name}」が見つかりません")
@@ -1572,6 +1709,22 @@ class DatabaseManager:
         keyword_lookup: dict[str, dict[str, object]],
         name_lookup: dict[str, str],
     ) -> dict[str, object]:
+        """対戦レコード行をアプリ用辞書へ整形します。
+
+        入力
+            row: ``sqlite3.Row``
+                ``matches`` テーブルから取得した行。
+            keyword_lookup: ``dict[str, dict[str, object]]``
+                キーワード ID → 詳細情報の辞書。
+            name_lookup: ``dict[str, str]``
+                キーワード名 → ID の辞書。
+        出力
+            ``dict[str, object]``
+                UI へ返却するためのフラットな辞書。
+        処理概要
+            1. 保存されているキーワード JSON を復元し ID を整理。
+            2. ターンや結果などをデコードし、表示用フィールドへまとめます。
+        """
         raw_keywords: list[object] = []
         if row["keywords"]:
             try:
@@ -1606,6 +1759,18 @@ class DatabaseManager:
     def _build_keyword_lookups(
         self, connection: sqlite3.Connection
     ) -> tuple[dict[str, dict[str, object]], dict[str, str]]:
+        """キーワード情報のルックアップ辞書を構築します。
+
+        入力
+            connection: ``sqlite3.Connection``
+                クエリ実行に用いるコネクション。
+        出力
+            ``tuple[dict[str, dict[str, object]], dict[str, str]]``
+                (ID→詳細辞書, 名称→ID) の 2 つの辞書。
+        処理概要
+            1. ``keywords`` テーブルを全件取得。
+            2. 取得した情報から ID/名称の両方で参照できる辞書を作成します。
+        """
         cursor = connection.execute(
             "SELECT identifier, name, description, usage_count FROM keywords"
         )
@@ -1630,6 +1795,22 @@ class DatabaseManager:
         name_lookup: dict[str, str],
         keywords: Iterable[object],
     ) -> list[str]:
+        """入力されたキーワード値を ID のリストへ正規化します。
+
+        入力
+            keyword_lookup: ``dict[str, dict[str, object]]``
+                ID → 詳細情報辞書。
+            name_lookup: ``dict[str, str]``
+                名称 → ID の辞書。
+            keywords: ``Iterable[object]``
+                JSON などから復元した入力値。
+        出力
+            ``list[str]``
+                重複を除いたキーワード ID のリスト。
+        処理概要
+            1. 文字列化/トリムした値を ID へ解決。
+            2. 未知の値を除外しつつ、順序を維持したまま重複排除します。
+        """
         sanitized: list[str] = []
         seen: set[str] = set()
         for value in keywords or []:
@@ -1652,6 +1833,19 @@ class DatabaseManager:
         keyword_lookup: dict[str, dict[str, object]],
         keyword_ids: Iterable[str],
     ) -> list[dict[str, object]]:
+        """キーワード ID から詳細情報を取得します。
+
+        入力
+            keyword_lookup: ``dict[str, dict[str, object]]``
+                ID → 詳細情報辞書。
+            keyword_ids: ``Iterable[str]``
+                参照したいキーワード ID 群。
+        出力
+            ``list[dict[str, object]]``
+                UI 表示用に整形したキーワード詳細のリスト。
+        処理概要
+            1. 指定された ID をルックアップし、存在するものだけ辞書化します。
+        """
         details: list[dict[str, object]] = []
         for identifier in keyword_ids:
             info = keyword_lookup.get(identifier)
@@ -1668,6 +1862,18 @@ class DatabaseManager:
         return details
 
     def _generate_keyword_identifier(self, connection: sqlite3.Connection) -> str:
+        """ユニークなキーワード識別子を生成します。
+
+        入力
+            connection: ``sqlite3.Connection``
+                重複チェックに利用するコネクション。
+        出力
+            ``str``
+                ``kw-XXXXXXXXXX`` 形式の識別子。
+        処理概要
+            1. UUID ベースで候補を生成。
+            2. 既存レコードと重複しないまで繰り返します。
+        """
         while True:
             identifier = f"kw-{uuid.uuid4().hex[:10]}"
             cursor = connection.execute(
@@ -1688,6 +1894,19 @@ class DatabaseManager:
 
     @staticmethod
     def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
+        """テーブルの存在有無を確認します。
+
+        入力
+            connection: ``sqlite3.Connection``
+                チェックに使用するコネクション。
+            table_name: ``str``
+                対象テーブル名。
+        出力
+            ``bool``
+                テーブルが存在すれば ``True``。
+        処理概要
+            1. ``sqlite_master`` を参照し該当テーブルが登録されているか確認します。
+        """
         cursor = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
             (table_name,),
@@ -1698,6 +1917,21 @@ class DatabaseManager:
     def _column_exists(
         connection: sqlite3.Connection, table_name: str, column_name: str
     ) -> bool:
+        """指定テーブルにカラムが存在するか確認します。
+
+        入力
+            connection: ``sqlite3.Connection``
+                チェック用コネクション。
+            table_name: ``str``
+                対象テーブル名。
+            column_name: ``str``
+                検索するカラム名。
+        出力
+            ``bool``
+                カラムが存在すれば ``True``。
+        処理概要
+            1. ``PRAGMA table_info`` を利用してカラム一覧を取得し、該当名称を探索します。
+        """
         try:
             cursor = connection.execute(f"PRAGMA table_info({table_name})")
         except sqlite3.DatabaseError:
@@ -1710,6 +1944,17 @@ class DatabaseManager:
 
     @staticmethod
     def _encode_turn(value: object) -> int:
+        """先攻/後攻の入力値を整数へ正規化します。
+
+        入力
+            value: ``object``
+                ブール値・数値・文字列などの入力。
+        出力
+            ``int``
+                先攻なら ``1``、後攻なら ``0``。
+        処理概要
+            1. 型に応じて比較し、未対応の値は :class:`ValueError` を送出します。
+        """
         if isinstance(value, bool):
             return 1 if value else 0
         if isinstance(value, (int, float)):
@@ -1724,6 +1969,18 @@ class DatabaseManager:
 
     @staticmethod
     def _encode_result(value: object) -> int:
+        """勝敗結果の入力値を整数へ変換します。
+
+        入力
+            value: ``object``
+                数値または文字列で表現された結果。
+        出力
+            ``int``
+                勝ち ``1``、負け ``-1``、引き分け ``0``。
+        処理概要
+            1. 文字列の場合は事前定義のマッピングを参照し、該当しない場合は整数化を試みます。
+            2. 未対応の値は :class:`ValueError` を送出します。
+        """
         if isinstance(value, (int, float)):
             return int(value)
         if isinstance(value, str):
@@ -1747,6 +2004,17 @@ class DatabaseManager:
 
     @staticmethod
     def _decode_turn(value: object) -> bool:
+        """整数や文字列で保存された先攻/後攻をブール値へ変換します。
+
+        入力
+            value: ``object``
+                DB から取得した値。
+        出力
+            ``bool``
+                ``True`` は先攻、``False`` は後攻。
+        処理概要
+            1. 型に応じて比較し、未対応値は ``False`` を返します。
+        """
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)):
@@ -1761,6 +2029,18 @@ class DatabaseManager:
 
     @staticmethod
     def _decode_result(value: object) -> int:
+        """DB に保存された勝敗結果を整数へ変換します。
+
+        入力
+            value: ``object``
+                数値または文字列表現の結果。
+        出力
+            ``int``
+                勝ち ``1``、負け ``-1``、引き分け ``0``。解釈不能な場合も 0。
+        処理概要
+            1. 文字列の場合は定義済みマッピングを適用し、該当しない場合は整数化を試みます。
+            2. いずれも該当しない場合は 0 を返します。
+        """
         if isinstance(value, (int, float)):
             return int(value)
         if isinstance(value, str):

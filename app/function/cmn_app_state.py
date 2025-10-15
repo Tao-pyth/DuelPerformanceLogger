@@ -1,4 +1,14 @@
-"""Application state helpers for the Eel-based user interface."""
+"""アプリケーション状態 (:class:`AppState`) の定義と管理ヘルパー。
+
+記載内容
+    - :class:`AppState`: UI へ渡すスナップショットのデータクラス。
+    - グローバル状態の取得・更新関数 (:func:`get_app_state` など)。
+    - DB から最新情報を集約する :func:`build_state`。
+
+想定参照元
+    - :mod:`app.main` での状態更新と Eel への返却処理。
+    - テストコードでのモック状態生成。
+"""
 
 from __future__ import annotations
 
@@ -13,7 +23,16 @@ if TYPE_CHECKING:  # pragma: no cover - import guard for type checking only
 
 @dataclass
 class AppState:
-    """Container object representing the current application state."""
+    """アプリ全体の状態を保持するデータクラス。
+
+    役割
+        - デッキ・シーズン・対戦履歴など UI が必要とする情報を集約します。
+        - メタ情報（マイグレーション結果やバックアップ状況）も同時に保持します。
+
+    想定利用箇所
+        - :mod:`app.main` 内でのスナップショット生成やシリアライズ。
+        - テストコードでの状態比較。
+    """
 
     config: dict[str, Any] = field(default_factory=dict)
     ui_mode: str = "normal"
@@ -32,7 +51,16 @@ class AppState:
     db: Optional["DatabaseManager"] = None
 
     def snapshot(self) -> dict[str, Any]:
-        """Return a JSON-serialisable representation of the current state."""
+        """現在の状態を JSON 化しやすい辞書に変換します。
+
+        入力
+            引数はありません。
+        出力
+            ``dict[str, Any]``
+                UI へ返却する際に利用する辞書形式のデータ。
+        処理概要
+            1. データクラスの各フィールドを辞書へ集約します。
+        """
 
         return {
             "config": self.config,
@@ -52,7 +80,16 @@ class AppState:
         }
 
     def clone(self) -> "AppState":
-        """Create a deep-ish copy of the state for safe external use."""
+        """状態の安全なコピーを生成します。
+
+        入力
+            引数はありません。
+        出力
+            :class:`AppState`
+                リストや辞書を浅いコピーした新しいインスタンス。
+        処理概要
+            1. 各フィールドを ``dict``/``list`` ベースで複製し、新しい :class:`AppState` を生成します。
+        """
 
         return AppState(
             config=dict(self.config),
@@ -79,13 +116,32 @@ _state = AppState(config=load_config())
 
 
 def get_app_state() -> AppState:
-    """Return the current global :class:`AppState` instance."""
+    """現在のグローバル状態を返します。
+
+    入力
+        引数はありません。
+    出力
+        :class:`AppState`
+            グローバルに保持している状態参照。
+    処理概要
+        1. モジュールレベル変数 ``_state`` をそのまま返却します。
+    """
 
     return _state
 
 
 def set_app_state(state: AppState) -> AppState:
-    """Replace the global application state with *state* and return it."""
+    """グローバル状態を差し替えて返します。
+
+    入力
+        state: :class:`AppState`
+            設定したい状態オブジェクト。
+    出力
+        :class:`AppState`
+            代入後の状態（引数と同じインスタンス）。
+    処理概要
+        1. グローバル変数 ``_state`` を更新し、新しい参照を返します。
+    """
 
     global _state
     _state = state
@@ -93,7 +149,17 @@ def set_app_state(state: AppState) -> AppState:
 
 
 def reset_app_state() -> AppState:
-    """Reset the global state to a fresh configuration baseline."""
+    """グローバル状態を初期化します。
+
+    入力
+        引数はありません。
+    出力
+        :class:`AppState`
+            初期化後の状態。
+    処理概要
+        1. 設定を再読み込みし新しい :class:`AppState` を生成します。
+        2. グローバル変数 ``_state`` を更新して返します。
+    """
 
     global _state
     _state = AppState(config=load_config())
@@ -107,7 +173,24 @@ def build_state(
     migration_result: str = "",
     migration_timestamp: str = "",
 ) -> AppState:
-    """Create an :class:`AppState` filled with the latest DB snapshot."""
+    """データベースから最新情報を集約し :class:`AppState` を生成します。
+
+    入力
+        db: :class:`DatabaseManager`
+            データ取得に利用する DB マネージャー。
+        config: ``Mapping[str, Any]``
+            設定値。状態へコピーされます。
+        migration_result: ``str``
+            直近マイグレーションの結果メッセージ。
+        migration_timestamp: ``str``
+            マイグレーション実行時刻の文字列。
+    出力
+        :class:`AppState`
+            DB スナップショットを反映した状態。
+    処理概要
+        1. DB からデッキや対戦ログを取得し辞書へ格納します。
+        2. メタデータやファイルパスを含めて :class:`AppState` を生成します。
+    """
 
     state = AppState(
         config=dict(config),
