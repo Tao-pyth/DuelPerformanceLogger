@@ -431,19 +431,19 @@ class DatabaseManager:
             cursor.execute("PRAGMA foreign_keys = ON;")
             cursor.executescript(
                 """
-                CREATE TABLE db_metadata (
+                CREATE TABLE IF NOT EXISTS db_metadata (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
 
-                CREATE TABLE decks (
+                CREATE TABLE IF NOT EXISTS decks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
                     description TEXT DEFAULT '',
                     usage_count INTEGER NOT NULL DEFAULT 0
                 );
 
-                CREATE TABLE seasons (
+                CREATE TABLE IF NOT EXISTS seasons (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
                     description TEXT DEFAULT '',
@@ -454,13 +454,13 @@ class DatabaseManager:
                     rank_statistics_target INTEGER NOT NULL DEFAULT 0
                 );
 
-                CREATE TABLE opponent_decks (
+                CREATE TABLE IF NOT EXISTS opponent_decks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
                     usage_count INTEGER NOT NULL DEFAULT 0
                 );
 
-                CREATE TABLE keywords (
+                CREATE TABLE IF NOT EXISTS keywords (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     identifier TEXT NOT NULL UNIQUE,
                     name TEXT NOT NULL UNIQUE,
@@ -471,7 +471,7 @@ class DatabaseManager:
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
                 );
 
-                CREATE TABLE matches (
+                CREATE TABLE IF NOT EXISTS matches (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     match_no INTEGER NOT NULL,
                     deck_id INTEGER NOT NULL,
@@ -495,10 +495,10 @@ class DatabaseManager:
                         ON UPDATE CASCADE
                 );
 
-                CREATE INDEX idx_matches_deck_id ON matches(deck_id);
-                CREATE INDEX idx_matches_season_id ON matches(season_id);
-                CREATE INDEX idx_matches_created_at ON matches(created_at);
-                CREATE INDEX idx_matches_result ON matches(result);
+                CREATE INDEX IF NOT EXISTS idx_matches_deck_id ON matches(deck_id);
+                CREATE INDEX IF NOT EXISTS idx_matches_season_id ON matches(season_id);
+                CREATE INDEX IF NOT EXISTS idx_matches_created_at ON matches(created_at);
+                CREATE INDEX IF NOT EXISTS idx_matches_result ON matches(result);
                 """
             )
 
@@ -564,7 +564,7 @@ class DatabaseManager:
             if not self._table_exists(connection, "matches"):
                 connection.execute(
                     """
-                    CREATE TABLE matches (
+                    CREATE TABLE IF NOT EXISTS matches (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         match_no INTEGER NOT NULL,
                         deck_id INTEGER NOT NULL,
@@ -614,7 +614,7 @@ class DatabaseManager:
             if not self._table_exists(connection, "opponent_decks"):
                 connection.execute(
                     """
-                    CREATE TABLE opponent_decks (
+                    CREATE TABLE IF NOT EXISTS opponent_decks (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         name TEXT NOT NULL UNIQUE,
                         usage_count INTEGER NOT NULL DEFAULT 0
@@ -631,7 +631,7 @@ class DatabaseManager:
             if not self._table_exists(connection, "keywords"):
                 connection.execute(
                     """
-                    CREATE TABLE keywords (
+                    CREATE TABLE IF NOT EXISTS keywords (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         identifier TEXT NOT NULL UNIQUE,
                         name TEXT NOT NULL UNIQUE,

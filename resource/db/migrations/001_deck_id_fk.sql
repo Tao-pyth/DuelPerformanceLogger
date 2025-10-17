@@ -1,7 +1,7 @@
 PRAGMA foreign_keys = OFF;
 BEGIN TRANSACTION;
 
-CREATE TABLE matches_new (
+CREATE TABLE IF NOT EXISTS matches_new (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   match_no    INTEGER NOT NULL,
   deck_id     INTEGER NOT NULL,
