@@ -24,6 +24,7 @@ import csv
 import io
 import json
 import re
+import shutil
 import sqlite3
 import uuid
 from collections import Counter
@@ -158,7 +159,14 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    CURRENT_SCHEMA_VERSION = "0.3.2"
+    SCHEMA_VERSION = 3
+    SCHEMA_SEMVER_MAP = {
+        0: "0.0.0",
+        1: "0.3.0",
+        2: "0.3.1",
+        3: "0.3.2",
+    }
+    CURRENT_SCHEMA_VERSION = SCHEMA_SEMVER_MAP[SCHEMA_VERSION]
     METADATA_DEFAULTS = {
         "schema_version": CURRENT_SCHEMA_VERSION,
         "ui_mode": "normal",
@@ -219,6 +227,250 @@ class DatabaseManager:
         connection.execute("PRAGMA foreign_keys = ON;")
         return connection
 
+    @staticmethod
+    def _get_user_version(connection: sqlite3.Connection) -> int:
+        """Return the current PRAGMA ``user_version`` value."""
+
+        row = connection.execute("PRAGMA user_version").fetchone()
+        if not row:
+            return 0
+        try:
+            return int(row[0])
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            return 0
+
+    @staticmethod
+    def _set_user_version(connection: sqlite3.Connection, version: int) -> None:
+        """Update PRAGMA ``user_version`` to *version*."""
+
+        connection.execute(f"PRAGMA user_version = {int(version)}")
+
+    @staticmethod
+    def _has_user_tables(connection: sqlite3.Connection) -> bool:
+        """Return ``True`` when any user-defined table exists."""
+
+        cursor = connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+        row = cursor.fetchone()
+        return bool(row and row[0])
+
+    @staticmethod
+    def _migration_directory() -> Path:
+        """Return the directory containing SQL migration scripts."""
+
+        return paths.project_root() / "db" / "migrations"
+
+    @classmethod
+    def _migration_scripts(cls) -> list[tuple[int, Path]]:
+        """Collect ordered migration scripts from the migration directory."""
+
+        directory = cls._migration_directory()
+        if not directory.exists():
+            return []
+
+        migrations: list[tuple[int, Path]] = []
+        for path in directory.glob("*.sql"):
+            match = re.match(r"^(\d+)_.*\.sql$", path.name)
+            if not match:
+                continue
+            migrations.append((int(match.group(1)), path))
+
+        migrations.sort(key=lambda item: item[0])
+        return migrations
+
+    @staticmethod
+    def _iter_sql_statements(script: str) -> Iterator[str]:
+        """Yield SQL statements contained in *script*."""
+
+        # Remove full-line comments for simplicity.
+        lines: list[str] = []
+        for line in script.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("--"):
+                continue
+            lines.append(line)
+
+        cleaned = "\n".join(lines)
+        statement: list[str] = []
+        in_quote: str | None = None
+        escape = False
+
+        for char in cleaned:
+            if in_quote:
+                statement.append(char)
+                if escape:
+                    escape = False
+                    continue
+                if char == "\\":
+                    escape = True
+                    continue
+                if char == in_quote:
+                    in_quote = None
+                continue
+
+            if char in {'"', "'"}:
+                in_quote = char
+                statement.append(char)
+                continue
+
+            if char == ";":
+                text = "".join(statement).strip()
+                if text:
+                    yield text
+                statement.clear()
+                continue
+
+            statement.append(char)
+
+        trailing = "".join(statement).strip()
+        if trailing:
+            yield trailing
+
+    def _migration_hooks(self) -> dict[int, Callable[[sqlite3.Connection], None]]:
+        """Return post-script migration hooks keyed by schema version."""
+
+        return {
+            2: self._migration_hook_v2,
+            3: self._migration_hook_v3,
+        }
+
+    def _apply_migration_scripts(
+        self,
+        connection: sqlite3.Connection,
+        start_version: int,
+        target_version: int,
+    ) -> None:
+        """Apply SQL migrations and hooks from *start_version* (exclusive) to *target_version*."""
+
+        migrations = self._migration_scripts()
+        hooks = self._migration_hooks()
+
+        for version, script_path in migrations:
+            if version <= start_version or version > target_version:
+                continue
+
+            script_text = script_path.read_text(encoding="utf-8")
+            statements = list(self._iter_sql_statements(script_text))
+
+            connection.execute("BEGIN")
+            try:
+                for statement in statements:
+                    connection.execute(statement)
+
+                hook = hooks.get(version)
+                if hook is not None:
+                    hook(connection)
+
+                self._set_user_version(connection, version)
+            except Exception as exc:
+                connection.execute("ROLLBACK")
+                log_error(
+                    "Failed to apply migration",
+                    exc,
+                    version=version,
+                    script=str(script_path),
+                )
+                raise DatabaseError(
+                    f"Migration {version} failed while executing '{script_path.name}'"
+                ) from exc
+            else:
+                connection.execute("COMMIT")
+
+    def _migration_hook_v2(self, connection: sqlite3.Connection) -> None:
+        """Ensure opponent deck usage column exists after v2 migration."""
+
+        if self._table_exists(connection, "opponent_decks") and not self._column_exists(
+            connection, "opponent_decks", "usage_count"
+        ):
+            connection.execute(
+                "ALTER TABLE opponent_decks ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0"
+            )
+
+    def _migration_hook_v3(self, connection: sqlite3.Connection) -> None:
+        """Add keyword and match columns introduced in schema v3."""
+
+        if self._table_exists(connection, "seasons") and not self._column_exists(
+            connection, "seasons", "rank_statistics_target"
+        ):
+            connection.execute(
+                "ALTER TABLE seasons ADD COLUMN rank_statistics_target INTEGER NOT NULL DEFAULT 0"
+            )
+            connection.execute(
+                "UPDATE seasons SET rank_statistics_target = COALESCE(rank_statistics_target, 0)"
+            )
+
+        if self._table_exists(connection, "keywords"):
+            if not self._column_exists(connection, "keywords", "is_protected"):
+                connection.execute(
+                    "ALTER TABLE keywords ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0"
+                )
+                connection.execute(
+                    "UPDATE keywords SET is_protected = COALESCE(is_protected, 0)"
+                )
+            if not self._column_exists(connection, "keywords", "is_hidden"):
+                connection.execute(
+                    "ALTER TABLE keywords ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0"
+                )
+                connection.execute(
+                    "UPDATE keywords SET is_hidden = COALESCE(is_hidden, 0)"
+                )
+
+        if self._table_exists(connection, "matches"):
+            if not self._column_exists(connection, "matches", "memo"):
+                connection.execute(
+                    "ALTER TABLE matches ADD COLUMN memo TEXT NOT NULL DEFAULT ''"
+                )
+            if not self._column_exists(connection, "matches", "favorite"):
+                connection.execute(
+                    "ALTER TABLE matches ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0"
+                )
+            if not self._column_exists(connection, "matches", "youtube_url"):
+                connection.execute(
+                    "ALTER TABLE matches ADD COLUMN youtube_url TEXT DEFAULT ''"
+                )
+            if not self._column_exists(connection, "matches", "created_at"):
+                connection.execute(
+                    "ALTER TABLE matches ADD COLUMN created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))"
+                )
+            if not self._column_exists(connection, "matches", "season_id"):
+                connection.execute("ALTER TABLE matches ADD COLUMN season_id INTEGER")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_matches_deck_id ON matches(deck_id)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_matches_created_at ON matches(created_at)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_matches_result ON matches(result)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_matches_season_id ON matches(season_id)"
+            )
+
+        self._ensure_default_keywords(connection)
+
+    def _create_backup_copy(self) -> Path:
+        """Create a timestamped backup of the current database file."""
+
+        if not self._db_path.exists():
+            raise FileNotFoundError(self._db_path)
+
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        suffix = ""
+        counter = 1
+
+        while True:
+            name = f"duel_performance_backup_{timestamp}{suffix}.sqlite3"
+            candidate = self._db_path.with_name(name)
+            if not candidate.exists():
+                break
+            suffix = f"_{counter}"
+            counter += 1
+
+        shutil.copy2(self._db_path, candidate)
+        return candidate
+
     def _is_integrity_ok(self) -> bool:
         """PRAGMA integrity_check の結果が ``ok`` か判定する。"""
 
@@ -240,37 +492,17 @@ class DatabaseManager:
     def ensure_database(self) -> None:
         """DB ファイルが存在しない、またはメタデータが欠損している場合にスキーマを作成します。"""
 
-        needs_initialization = False
-
-        if self._db_path.exists():
-            if not self._is_integrity_ok():
-                try:
-                    self.export_backup()
-                except Exception as exc:  # pragma: no cover - best effort logging
-                    log_error(
-                        "Failed to export backup before database reinitialization",
-                        exc,
-                        db_path=str(self._db_path),
-                    )
-                self.initialize_database()
-                # TODO: Restore data from the backup once recovery flow is implemented.
-
-        if not self._db_path.exists():
-            needs_initialization = True
-        else:
+        if self._db_path.exists() and not self._is_integrity_ok():
             try:
-                with self._connect() as connection:
-                    cursor = connection.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' AND name='db_metadata'"
-                    )
-                    if cursor.fetchone() is None:
-                        needs_initialization = True
-            except sqlite3.DatabaseError:
-                # 何らかの理由で接続やメタデータ取得に失敗した場合も初期化する
-                needs_initialization = True
+                self.export_backup()
+            except Exception as exc:  # pragma: no cover - best effort logging
+                log_error(
+                    "Failed to export backup before database reinitialization",
+                    exc,
+                    db_path=str(self._db_path),
+                )
 
-        if needs_initialization:
-            self.initialize_database()
+        self.initialize_database()
 
         self.ensure_metadata_defaults()
         self._migrate_schema()
@@ -392,6 +624,16 @@ class DatabaseManager:
     def get_schema_version(self) -> str:
         """保存されているスキーマバージョンを取得する。"""
 
+        try:
+            with self._connect() as connection:
+                user_version = self._get_user_version(connection)
+        except sqlite3.DatabaseError:
+            user_version = 0
+
+        mapped = self.SCHEMA_SEMVER_MAP.get(user_version)
+        if mapped:
+            return mapped
+
         value = self.get_metadata("schema_version")
         return self.normalize_schema_version(
             value, fallback=self.CURRENT_SCHEMA_VERSION
@@ -400,134 +642,67 @@ class DatabaseManager:
     def set_schema_version(self, version: str | int) -> None:
         """スキーマバージョンを更新する。"""
 
-        normalized = self.normalize_schema_version(
-            version, fallback=self.CURRENT_SCHEMA_VERSION
-        )
-        self.set_metadata("schema_version", normalized)
+        if isinstance(version, int):
+            target_version = version
+            normalized = self.SCHEMA_SEMVER_MAP.get(
+                target_version,
+                self.normalize_schema_version(version, fallback=self.CURRENT_SCHEMA_VERSION),
+            )
+        else:
+            normalized = self.normalize_schema_version(
+                version, fallback=self.CURRENT_SCHEMA_VERSION
+            )
+            reverse_lookup = {
+                semver: number for number, semver in self.SCHEMA_SEMVER_MAP.items()
+            }
+            target_version = reverse_lookup.get(normalized, self.SCHEMA_VERSION)
+
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            try:
+                self._set_user_version(connection, target_version)
+                connection.execute(
+                    "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
+                    ("schema_version", normalized),
+                )
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
+            else:
+                connection.execute("COMMIT")
 
     def initialize_database(self) -> None:
-        """DB を初期化（既存ファイルを残したままスキーマを再構築）。
-
-        - 何度呼んでも安全（冪等）な設計です。
-        - 既存ファイルは削除せず、同一コネクション上で `DROP` → `CREATE` を実行します。
-        """
+        """Ensure the database schema exists and is up to date without data loss."""
 
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
 
         with sqlite3.connect(self._db_path) as connection:
-            cursor = connection.cursor()
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON;")
 
-            # 既存スキーマを安全に破棄（外部キー制約は一時的に OFF）
-            cursor.execute("PRAGMA foreign_keys = OFF;")
-            cursor.executescript(
-                """
-                DROP TABLE IF EXISTS matches;
-                DROP TABLE IF EXISTS seasons;
-                DROP TABLE IF EXISTS decks;
-                DROP TABLE IF EXISTS db_metadata;
-                """
+            has_tables = self._has_user_tables(connection)
+            current_version = self._get_user_version(connection) if has_tables else 0
+            metadata_exists = (
+                has_tables
+                and self._table_exists(connection, "db_metadata")
             )
 
-            cursor.execute("PRAGMA foreign_keys = ON;")
-            cursor.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS db_metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                );
+            if not has_tables:
+                self._apply_migration_scripts(connection, 0, self.SCHEMA_VERSION)
+            else:
+                target_version = self.SCHEMA_VERSION
+                effective_version = current_version if metadata_exists else 0
+                if effective_version < target_version:
+                    try:
+                        self._create_backup_copy()
+                    except Exception as exc:  # pragma: no cover - best effort logging
+                        log_error(
+                            "Failed to create database backup before migration",
+                            exc,
+                            db_path=str(self._db_path),
+                        )
 
-                CREATE TABLE IF NOT EXISTS decks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE,
-                    description TEXT DEFAULT '',
-                    usage_count INTEGER NOT NULL DEFAULT 0
-                );
-
-                CREATE TABLE IF NOT EXISTS seasons (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE,
-                    description TEXT DEFAULT '',
-                    start_date TEXT,
-                    start_time TEXT,
-                    end_date TEXT,
-                    end_time TEXT,
-                    rank_statistics_target INTEGER NOT NULL DEFAULT 0
-                );
-
-                CREATE TABLE IF NOT EXISTS opponent_decks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE,
-                    usage_count INTEGER NOT NULL DEFAULT 0
-                );
-
-                CREATE TABLE IF NOT EXISTS keywords (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    identifier TEXT NOT NULL UNIQUE,
-                    name TEXT NOT NULL UNIQUE,
-                    description TEXT DEFAULT '',
-                    usage_count INTEGER NOT NULL DEFAULT 0,
-                    is_protected INTEGER NOT NULL DEFAULT 0,
-                    is_hidden INTEGER NOT NULL DEFAULT 0,
-                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-                );
-
-                CREATE TABLE IF NOT EXISTS matches (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    match_no INTEGER NOT NULL,
-                    deck_id INTEGER NOT NULL,
-                    season_id INTEGER,
-                    turn INTEGER NOT NULL CHECK (turn IN (0, 1)),
-                    opponent_deck TEXT,
-                    keywords TEXT,
-                    memo TEXT NOT NULL DEFAULT '',
-                    result INTEGER NOT NULL CHECK (result IN (-1, 0, 1)),
-                    youtube_url TEXT DEFAULT '',
-                    favorite INTEGER NOT NULL DEFAULT 0,
-                    -- 生成時刻は UTC のエポック秒
-                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                    FOREIGN KEY(deck_id)
-                        REFERENCES decks(id)
-                        ON DELETE RESTRICT
-                        ON UPDATE CASCADE,
-                    FOREIGN KEY(season_id)
-                        REFERENCES seasons(id)
-                        ON DELETE SET NULL
-                        ON UPDATE CASCADE
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_matches_deck_id ON matches(deck_id);
-                CREATE INDEX IF NOT EXISTS idx_matches_season_id ON matches(season_id);
-                CREATE INDEX IF NOT EXISTS idx_matches_created_at ON matches(created_at);
-                CREATE INDEX IF NOT EXISTS idx_matches_result ON matches(result);
-                """
-            )
-
-            cursor.execute(
-                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
-                ("schema_version", self.CURRENT_SCHEMA_VERSION),
-            )
-            cursor.execute(
-                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
-                ("ui_mode", "normal"),
-            )
-            cursor.execute(
-                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
-                ("last_backup", ""),
-            )
-            cursor.execute(
-                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
-                ("last_backup_at", ""),
-            )
-            cursor.execute(
-                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
-                ("last_migration_message", ""),
-            )
-            cursor.execute(
-                "INSERT OR REPLACE INTO db_metadata (key, value) VALUES (?, ?)",
-                ("last_migration_message_at", ""),
-            )
-
-            self._ensure_default_keywords(connection)
+                    self._apply_migration_scripts(connection, effective_version, target_version)
 
     # ------------------------------------------------------------------
     # メタデータ操作

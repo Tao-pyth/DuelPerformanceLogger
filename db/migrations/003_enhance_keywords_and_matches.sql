@@ -1,0 +1,2 @@
+-- Schema changes for keyword visibility and match memo fields are performed via
+-- Python hooks because they require conditional ALTER TABLE statements.
