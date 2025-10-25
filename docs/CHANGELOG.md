@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here. Version numbers follow `DPL.<MAJOR>.<MINOR>.<PATCH>`.
 
+## [0.3.3] - 2025-10-18
+### Added
+- EN: Introduced a command line restore tool with `full`/`upsert` modes, dry-run support, and detailed reporting for backup archives.
+- JP: バックアップアーカイブを復元する CLI ツールを追加し、`full`/`upsert` モードやドライラン、詳細レポートに対応しました。
+
+### Changed
+- EN: Database schema checks now rely on semantic version utilities that run forward migrations while safely skipping downgrades.
+- JP: データベーススキーマ判定でセマンティックバージョンユーティリティを用い、順方向マイグレーションのみを実行してダウングレードを安全にスキップするよう変更しました。
+- EN: The backup restore workflow processes typed CSV content in a fixed table order under a single transaction and surfaces progress/results in the UI.
+- JP: バックアップ復元処理でテーブル順序と型復元を固定し、単一トランザクションで実行して UI に進捗・結果を表示するよう更新しました。
+
+### Fixed
+- EN: CSV/ZIP restores now disable foreign key checks during import, verify integrity before commit, and emit failure diagnostics for troubleshooting.
+- JP: CSV/ZIP 復元でインポート中に外部キー制約を無効化し、コミット前に整合性検証を行って失敗時の診断情報を出力するよう修正しました。
+
+### Note on Follow-up (v0.3.3-1)
+- EN: A follow-up hotfix ensures `current > target` database versions are treated as **no-op** (skip migration entirely) and updates UI/log messages accordingly.
+- JP: 追補Hotfixでは、DBが **期待値より上位** の場合は **完全no-op**（マイグレーションを一切実行しない）とし、UI/ログ文言も「上位DB検出：マイグレーション不要」に統一します。
+
 ## [0.3.2] - 2025-10-17
 ### Added
 - EN: Users can record per-match memos from entry and edit screens and review them in the match detail view for later reference.

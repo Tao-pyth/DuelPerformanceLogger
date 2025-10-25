@@ -33,7 +33,7 @@ from app.function import (
 from app.function.cmn_config import load_config
 from app.function.cmn_logger import log_db_error
 from app.function.cmn_resources import get_text
-from app.function.core import paths
+from app.function.core import paths, versioning
 from app.function.core.backup_restore import RestoreReport
 from app.function.core.version import __version__
 
@@ -109,19 +109,25 @@ class DuelPerformanceService:
         # --- バージョン整合性チェック（既存ハンドラ利用） ---
         expected_version = self._expected_schema_version()
         current_version = self.db.get_schema_version()
-        if current_version != expected_version:
+        current_semver = versioning.coerce_version(current_version)
+        target_semver = versioning.coerce_version(
+            expected_version, fallback=current_semver
+        )
+
+        if current_semver < target_semver:
             self.migration_result = self._handle_version_mismatch(
                 current_version, expected_version
             )
+        elif current_semver == target_semver:
+            message = get_text("settings.db_migration_up_to_date")
+            self._record_migration_message(message)
+            self.db.set_schema_version(target_semver)
         else:
-            # 直近マイグレーションの説明を拾っておく（存在すれば）
-            self.migration_result = self.db.get_metadata("last_migration_message", "") or ""
-
-        # 期待 version を記録（観測/診断用途。実スキーマは ensure_database/_migrate_schema により整合）
-        self.db.set_schema_version(expected_version)
-        self.migration_timestamp = (
-            self.db.get_metadata("last_migration_message_at", "") or ""
-        )
+            # DB 側がターゲットより新しい場合は明示的にスキップメッセージのみ通知する。
+            message = get_text("settings.db_migration_upper_detected").format(
+                current=current_version, expected=expected_version
+            )
+            self._record_migration_message(message)
 
         # --- 起動後の AppState 構築 ---
         return self.refresh_state()
@@ -147,6 +153,29 @@ class DuelPerformanceService:
             migration_timestamp=self.migration_timestamp,
         )
         return set_app_state(state)
+
+    def _record_migration_message(self, message: str) -> None:
+        """マイグレーション結果メッセージをメタデータと状態へ記録します。
+
+        入力
+            message: ``str``
+                ユーザーへ提示するメッセージ本文。
+        出力
+            ``None``
+                副作用としてメタデータおよび :class:`AppState` 相当の属性を更新します。
+        処理概要
+            1. 現在時刻を取得し ISO 形式でタイムスタンプを作成します。
+            2. ``last_migration_message``/``last_migration_message_at`` メタデータへ保存します。
+            3. :attr:`migration_result` と :attr:`migration_timestamp` を更新します。
+        例外
+            なし。
+        """
+
+        timestamp_iso = datetime.now().astimezone().isoformat()
+        self.db.set_metadata("last_migration_message", message)
+        self.db.set_metadata("last_migration_message_at", timestamp_iso)
+        self.migration_result = message
+        self.migration_timestamp = timestamp_iso
 
     # ------------------------------------------------------------------
     # Application operations

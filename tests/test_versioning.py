@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import sqlite3
 from pathlib import Path
 
@@ -42,3 +43,36 @@ def test_get_db_version_falls_back_to_metadata(tmp_path: Path) -> None:
 def test_to_user_version_maps_known_values() -> None:
     assert versioning.to_user_version("0.3.2") == 3
     assert versioning.to_user_version(Version("0.3.1")) == 2
+
+
+def test_get_target_version_prefers_semver_from_files(
+    tmp_path: Path, monkeypatch
+) -> None:
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "V0.3.4__upgrade.sql").write_text("", encoding="utf-8")
+    (migrations / "V0.3.3__hotfix.py").write_text("", encoding="utf-8")
+
+    monkeypatch.setenv("DPL_MIGRATIONS_ROOT", str(migrations))
+    try:
+        importlib.reload(versioning)
+        assert versioning.get_target_version() == Version("0.3.4")
+    finally:
+        monkeypatch.delenv("DPL_MIGRATIONS_ROOT", raising=False)
+        importlib.reload(versioning)
+
+
+def test_get_target_version_falls_back_when_missing_semver(
+    tmp_path: Path, monkeypatch
+) -> None:
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "001_legacy.sql").write_text("", encoding="utf-8")
+
+    monkeypatch.setenv("DPL_MIGRATIONS_ROOT", str(migrations))
+    try:
+        importlib.reload(versioning)
+        assert versioning.get_target_version() == max(versioning.SCHEMA_VERSION_MAP.values())
+    finally:
+        monkeypatch.delenv("DPL_MIGRATIONS_ROOT", raising=False)
+        importlib.reload(versioning)
