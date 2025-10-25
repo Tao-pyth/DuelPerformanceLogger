@@ -27,46 +27,22 @@ import re
 import shutil
 import sqlite3
 import uuid
+import zipfile
 from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional
-import tempfile
-import zipfile
 
-from app.function.core import paths
+from packaging.version import Version
+
+from app.function.core import backup_restore, paths, versioning
 
 from .cmn_logger import log_error
 
 
-_SEMVER_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
-
-
-def parse_semver(ver: str) -> tuple[int, int, int]:
-    """Parse a semantic version string into a tuple of integers."""
-
-    match = _SEMVER_PATTERN.match(ver)
-    if not match:
-        raise ValueError(f"Invalid semantic version: {ver!r}")
-    major, minor, patch = match.groups()
-    return int(major), int(minor), int(patch)
-
-
-def semver_lt(a: tuple[int, int, int], b: tuple[int, int, int]) -> bool:
-    """Return True if version *a* is less than version *b*."""
-
-    return a < b
-
-
-def semver_eq(a: tuple[int, int, int], b: tuple[int, int, int]) -> bool:
-    """Return True if version *a* equals version *b*."""
-
-    return a == b
-
-
 MigrationFunc = Callable[["DatabaseManager"], None]
-MigrationStep = tuple[tuple[int, int, int], tuple[int, int, int], MigrationFunc]
+MigrationStep = tuple[Version, Version, MigrationFunc]
 
 
 def migrate_020_to_021(db: "DatabaseManager") -> None:
@@ -131,12 +107,12 @@ def migrate_legacy_to_020(db: "DatabaseManager") -> None:
     # 旧版→0.2.0 のベースへ。構造補完は _migrate_schema 前段で済むため実処理は不要。
     pass
 
-MIGRATION_CHAIN = [
-    ((0, 1, 1), (0, 2, 0), migrate_legacy_to_020),
-    ((0, 2, 0), (0, 2, 1), migrate_020_to_021),
-    ((0, 2, 1), (0, 3, 0), migrate_021_to_030),
-    ((0, 3, 0), (0, 3, 1), migrate_030_to_031),
-    ((0, 3, 1), (0, 3, 2), migrate_031_to_032),
+MIGRATION_CHAIN: list[MigrationStep] = [
+    (Version("0.1.1"), Version("0.2.0"), migrate_legacy_to_020),
+    (Version("0.2.0"), Version("0.2.1"), migrate_020_to_021),
+    (Version("0.2.1"), Version("0.3.0"), migrate_021_to_030),
+    (Version("0.3.0"), Version("0.3.1"), migrate_030_to_031),
+    (Version("0.3.1"), Version("0.3.2"), migrate_031_to_032),
 ]
 
 
@@ -159,14 +135,9 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    SCHEMA_VERSION = 3
-    SCHEMA_SEMVER_MAP = {
-        0: "0.0.0",
-        1: "0.3.0",
-        2: "0.3.1",
-        3: "0.3.2",
-    }
-    CURRENT_SCHEMA_VERSION = SCHEMA_SEMVER_MAP[SCHEMA_VERSION]
+    SCHEMA_VERSION = versioning.TARGET_SCHEMA_USER_VERSION
+    SCHEMA_SEMVER_MAP = versioning.SCHEMA_VERSION_STR_MAP
+    CURRENT_SCHEMA_VERSION = versioning.TARGET_SCHEMA_VERSION_STR
     METADATA_DEFAULTS = {
         "schema_version": CURRENT_SCHEMA_VERSION,
         "ui_mode": "normal",
@@ -211,6 +182,7 @@ class DatabaseManager:
         self._db_path = db_path
         # 保存先ディレクトリを事前に作成（既にあれば何もしない）
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._last_restore_report: backup_restore.RestoreReport | None = None
 
     # ------------------------------------------------------------------
     # 低レベルヘルパー（接続生成）
@@ -510,152 +482,64 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     # バージョン管理
     # ------------------------------------------------------------------
-    @staticmethod
-    def _int_to_semver(value: int) -> str:
-        """整数値を ``MAJOR.MINOR.PATCH`` 形式へ変換します。
-
-        入力
-            value: ``int``
-                スキーマバージョンを整数で表した値。
-        出力
-            ``str``
-                ``0.0.0`` のようなセマンティックバージョン文字列。
-        処理概要
-            1. 値を 0 以上へ補正し、1 万/100/1 の位で分割します。
-        """
-        safe_value = max(int(value), 0)
-        major = safe_value // 10000
-        minor = (safe_value // 100) % 100
-        patch = safe_value % 100
-        return f"{major}.{minor}.{patch}"
-
-    @staticmethod
-    def _is_semver(candidate: str) -> bool:
-        """文字列が ``X.Y.Z`` 形式のセマンティックバージョンか判定します。
-
-        入力
-            candidate: ``str``
-                判定対象文字列。
-        出力
-            ``bool``
-                正しい形式なら ``True``。
-        処理概要
-            1. ``.`` で 3 要素に分割し、それぞれが 0〜99 の数字か確認します。
-        """
-        parts = candidate.split(".")
-        if len(parts) != 3:
-            return False
-        for part in parts:
-            if not part.isdigit():
-                return False
-            if not (0 <= int(part) <= 99):
-                return False
-        return True
-
-    def migrate_semver_chain(self, current_ver_str: str, target_ver_str: str) -> str:
+    def migrate_semver_chain(
+        self, current_ver: str | Version, target_ver: str | Version
+    ) -> Version:
         """定義済みのセマンティックバージョン遷移チェーンを順番に実行します。"""
 
-        current = parse_semver(current_ver_str)
-        target = parse_semver(target_ver_str)
+        current = versioning.coerce_version(current_ver, fallback=Version("0.0.0"))
+        target = versioning.coerce_version(target_ver, fallback=versioning.TARGET_SCHEMA_VERSION)
 
-        while semver_lt(current, target):
+        while current < target:
             step_to_apply: MigrationStep | None = None
             for start_version, end_version, func in MIGRATION_CHAIN:
-                if semver_eq(start_version, current):
-                    if semver_lt(target, end_version):
+                if start_version == current:
+                    if target < end_version:
                         raise RuntimeError(
-                            "Target version is lower than migration end step"
+                            f"Target version {target} precedes migration end step {end_version}"
                         )
                     step_to_apply = (start_version, end_version, func)
                     break
 
             if step_to_apply is None:
-                raise RuntimeError(
-                    f"No migration step found from v{current[0]}.{current[1]}.{current[2]}"
-                )
+                raise RuntimeError(f"No migration step found from {current}")
 
             _, next_version, migration_func = step_to_apply
             migration_func(self)
             current = next_version
 
-        return f"v{current[0]}.{current[1]}.{current[2]}"
+        return current
 
     @classmethod
-    def normalize_schema_version(cls, value: str | int | None, fallback: str | None = None) -> str:
-        """スキーマバージョン表記を正規化します。
+    def normalize_schema_version(
+        cls, value: str | int | Version | None, fallback: str | Version | None = None
+    ) -> str:
+        """スキーマバージョン表記を正規化します。"""
 
-        入力
-            value: ``str | int | None``
-                正規化対象値。整数や文字列を許容します。
-            fallback: ``str | None``
-                正規化できなかった場合に使用する既定値。
-        出力
-            ``str``
-                正規化されたバージョン文字列。
-        処理概要
-            1. 整数の場合は :meth:`_int_to_semver` で変換。
-            2. 文字列の場合はトリムしてセマンティック形式か整数かを判定します。
-            3. いずれも判定できなければ ``fallback`` を返します。
-        """
         if fallback is None:
-            fallback = "0.0.0"
-
-        if isinstance(value, int):
-            return cls._int_to_semver(value)
-
-        if isinstance(value, str):
-            candidate = value.strip()
-        elif value is None:
-            candidate = ""
+            fallback_version = versioning.TARGET_SCHEMA_VERSION
         else:
-            candidate = str(value).strip()
-
-        if candidate:
-            if cls._is_semver(candidate):
-                return candidate
-            if candidate.isdigit():
-                try:
-                    return cls._int_to_semver(int(candidate))
-                except ValueError:  # pragma: no cover - defensive
-                    pass
-
-        return fallback
+            fallback_version = versioning.coerce_version(fallback)
+        return versioning.normalize_version_string(value, fallback=fallback_version)
 
     def get_schema_version(self) -> str:
         """保存されているスキーマバージョンを取得する。"""
 
         try:
             with self._connect() as connection:
-                user_version = self._get_user_version(connection)
+                version = versioning.get_db_version(connection)
         except sqlite3.DatabaseError:
-            user_version = 0
+            version = versioning.TARGET_SCHEMA_VERSION
+        return str(version)
 
-        mapped = self.SCHEMA_SEMVER_MAP.get(user_version)
-        if mapped:
-            return mapped
-
-        value = self.get_metadata("schema_version")
-        return self.normalize_schema_version(
-            value, fallback=self.CURRENT_SCHEMA_VERSION
-        )
-
-    def set_schema_version(self, version: str | int) -> None:
+    def set_schema_version(self, version: str | int | Version) -> None:
         """スキーマバージョンを更新する。"""
 
-        if isinstance(version, int):
-            target_version = version
-            normalized = self.SCHEMA_SEMVER_MAP.get(
-                target_version,
-                self.normalize_schema_version(version, fallback=self.CURRENT_SCHEMA_VERSION),
-            )
-        else:
-            normalized = self.normalize_schema_version(
-                version, fallback=self.CURRENT_SCHEMA_VERSION
-            )
-            reverse_lookup = {
-                semver: number for number, semver in self.SCHEMA_SEMVER_MAP.items()
-            }
-            target_version = reverse_lookup.get(normalized, self.SCHEMA_VERSION)
+        normalized_version = versioning.coerce_version(
+            version, fallback=versioning.TARGET_SCHEMA_VERSION
+        )
+        target_version = versioning.to_user_version(normalized_version)
+        normalized = str(normalized_version)
 
         with self._connect() as connection:
             connection.execute("BEGIN")
@@ -869,8 +753,8 @@ class DatabaseManager:
         if keyword_changed:
             self.recalculate_keyword_usage()
 
-        current_version = self.get_schema_version()
-        target_version = f"v{self.CURRENT_SCHEMA_VERSION}"
+        current_version = versioning.coerce_version(self.get_schema_version())
+        target_version = versioning.TARGET_SCHEMA_VERSION
         reached = self.migrate_semver_chain(current_version, target_version)
         self.set_schema_version(reached)
 
@@ -969,92 +853,44 @@ class DatabaseManager:
 
         return destination
 
-    def import_backup(self, source: Path | str) -> dict[str, int]:
+    def import_backup(
+        self,
+        source: Path | str,
+        *,
+        mode: str = "full",
+        dry_run: bool = False,
+    ) -> backup_restore.RestoreReport:
         """CSV バックアップからデータを読み込み復元する。"""
 
         source_path = Path(source)
         if not source_path.exists():
             raise DatabaseError(f"Backup source '{source}' not found")
 
-        restored: dict[str, int] = {}
+        try:
+            report = backup_restore.restore_from_directory(
+                self.db_path, source_path, mode=mode, dry_run=dry_run
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise DatabaseError(str(exc)) from exc
 
-        with self.transaction() as connection:
-            for table in ("decks", "opponent_decks", "seasons", "matches"):
-                file_path = source_path / f"{table}.csv"
-                if not file_path.exists():
-                    continue
+        self._last_restore_report = report
+        if not report.ok:
+            message = "Restore failed"
+            if report.log_path:
+                message += f" (see {report.log_path})"
+            raise DatabaseError(message)
 
-                with file_path.open("r", encoding="utf-8", newline="") as stream:
-                    reader = csv.reader(stream)
-                    header = next(reader, None)
-                    if not header:
-                        continue
+        if not dry_run:
+            self.recalculate_usage_counts()
+            self.recalculate_keyword_usage()
 
-                    column_info = connection.execute(
-                        f"PRAGMA table_info({table})"
-                    ).fetchall()
-                    valid_columns = [row[1] for row in column_info]
-                    insert_columns = [col for col in header if col in valid_columns]
-                    if table == "matches" and "deck_id" not in insert_columns:
-                        insert_columns.append("deck_id")
-                    if not insert_columns:
-                        continue
+        return report
 
-                    placeholders = ", ".join(["?"] * len(insert_columns))
-                    column_list = ", ".join(insert_columns)
-                    query = f"INSERT INTO {table} ({column_list}) VALUES ({placeholders})"
+    @property
+    def last_restore_report(self) -> backup_restore.RestoreReport | None:
+        """Return the most recent restore report if available."""
 
-                    count = 0
-                    for values in reader:
-                        row_map = {
-                            header[i]: values[i]
-                            for i in range(min(len(values), len(header)))
-                        }
-
-                        if table == "matches":
-                            try:
-                                if "turn" in row_map:
-                                    row_map["turn"] = self._encode_turn(row_map["turn"])
-                                if "result" in row_map:
-                                    row_map["result"] = self._encode_result(row_map["result"])
-                                if "season_id" in insert_columns:
-                                    season_value = row_map.get("season_id")
-                                    if season_value in (None, "", "null", "NULL"):
-                                        row_map["season_id"] = None
-                                    else:
-                                        try:
-                                            row_map["season_id"] = int(season_value)
-                                        except (TypeError, ValueError):
-                                            row_map["season_id"] = None
-                                deck_identifier = row_map.get("deck_id")
-                                if deck_identifier in (None, "", 0):
-                                    deck_name_value = str(row_map.get("deck_name", "") or "").strip()
-                                    deck_id = self._find_deck_id(connection, deck_name_value)
-                                    if deck_id is None:
-                                        log_error(
-                                            "Failed to resolve deck_id during import",
-                                            DatabaseError("Unknown deck name"),
-                                            deck_name=deck_name_value,
-                                        )
-                                        continue
-                                    row_map["deck_id"] = deck_id
-                                else:
-                                    row_map["deck_id"] = int(deck_identifier)
-                            except ValueError as exc:
-                                log_error(
-                                    "Failed to convert legacy match data during import",
-                                    exc,
-                                    row=row_map,
-                                )
-                                continue
-
-                        params = [row_map.get(col) for col in insert_columns]
-                        connection.execute(query, params)
-                        count += 1
-                    restored[table] = count
-
-        self.recalculate_usage_counts()
-        return restored
+        return self._last_restore_report
 
     def export_backup_zip(
         self, destination: Optional[Path | str] = None
@@ -1072,40 +908,37 @@ class DatabaseManager:
         buffer.seek(0)
         return backup_dir, archive_name, buffer.read()
 
-    def import_backup_archive(self, payload: bytes) -> dict[str, int]:
+    def import_backup_archive(
+        self,
+        payload: bytes,
+        *,
+        mode: str = "full",
+        dry_run: bool = False,
+    ) -> backup_restore.RestoreReport:
         """ZIP 化されたバックアップからデータを復元する。"""
 
         if not payload:
             raise DatabaseError("バックアップデータが空です")
 
-        expected_files = {
-            "decks.csv",
-            "opponent_decks.csv",
-            "seasons.csv",
-            "matches.csv",
-        }
+        try:
+            report = backup_restore.restore_from_zip_bytes(
+                self.db_path, payload, mode=mode, dry_run=dry_run
+            )
+        except ValueError as exc:
+            raise DatabaseError(str(exc)) from exc
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-                members = [info for info in archive.infolist() if not info.is_dir()]
-                found_files = {Path(info.filename).name for info in members}
-                missing = expected_files - found_files
-                if missing:
-                    raise DatabaseError(
-                        "バックアップに必要なファイルが不足しています: "
-                        + ", ".join(sorted(missing))
-                    )
+        self._last_restore_report = report
+        if not report.ok:
+            message = "Restore failed"
+            if report.log_path:
+                message += f" (see {report.log_path})"
+            raise DatabaseError(message)
 
-                for info in members:
-                    name = Path(info.filename).name
-                    if name not in expected_files:
-                        continue
-                    target_path = temp_path / name
-                    with archive.open(info) as source, target_path.open("wb") as dest:
-                        dest.write(source.read())
+        if not dry_run:
+            self.recalculate_usage_counts()
+            self.recalculate_keyword_usage()
 
-            return self.import_backup(temp_path)
+        return report
 
     def reset_database(self) -> None:
         """テーブルを再構築して空の状態へ初期化する。"""

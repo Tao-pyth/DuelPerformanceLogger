@@ -9,3 +9,5 @@
 # Core runtime dependencies
 Eel==0.16.0
     # via -r requirements.in
+packaging==23.2
+    # via -r requirements.in

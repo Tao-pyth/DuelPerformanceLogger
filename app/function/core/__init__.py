@@ -8,4 +8,12 @@
     - UI/サービス層からの直接利用。
 """
 
-__all__ = ["ui_notify", "paths", "version"]
+__all__ = [
+    "ui_notify",
+    "paths",
+    "version",
+    "versioning",
+    "backup_restore",
+    "csv_schema_map",
+    "migration_runner",
+]
