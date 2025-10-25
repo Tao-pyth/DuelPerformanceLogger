@@ -8,10 +8,16 @@ ensure consistent comparisons.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
+import logging
+import os
+import re
 import sqlite3
+from pathlib import Path
 
 from packaging.version import InvalidVersion, Version
+
+from app.function.core import paths
 
 __all__ = [
     "SCHEMA_VERSION_MAP",
@@ -33,6 +39,11 @@ class RestoreVersionError(RuntimeError):
     """Raised when schema version information cannot be interpreted."""
 
 
+_LOGGER = logging.getLogger(__name__)
+_MIGRATION_ROOT_ENV = "DPL_MIGRATIONS_ROOT"
+_SEMVER_PATTERN = re.compile(r"V(?P<version>\d+\.\d+\.\d+)__", re.IGNORECASE)
+
+
 SCHEMA_VERSION_MAP: dict[int, Version] = {
     0: Version("0.0.0"),
     1: Version("0.3.0"),
@@ -46,14 +57,68 @@ SCHEMA_VERSION_STR_MAP: dict[int, str] = {
 }
 """String representation of :data:`SCHEMA_VERSION_MAP`."""
 
-TARGET_SCHEMA_USER_VERSION: int = max(SCHEMA_VERSION_MAP)
-"""Latest known ``user_version`` value."""
 
-TARGET_SCHEMA_VERSION: Version = SCHEMA_VERSION_MAP[TARGET_SCHEMA_USER_VERSION]
+def _migration_directory() -> Path:
+    """Return the directory that holds migration files."""
+
+    override = os.environ.get(_MIGRATION_ROOT_ENV)
+    if override:
+        return Path(override)
+    return paths.project_root() / "db" / "migrations"
+
+
+def _discover_semver_from_name(name: str) -> Version | None:
+    """Extract :class:`Version` information from *name* when possible."""
+
+    match = _SEMVER_PATTERN.search(name)
+    if match:
+        try:
+            return Version(match.group("version"))
+        except InvalidVersion:
+            return None
+    return None
+
+
+def _iter_migration_versions(directory: Path) -> Iterable[Version]:
+    """Yield semantic versions inferred from migration filenames in *directory*."""
+
+    if not directory.exists() or not directory.is_dir():
+        return []
+
+    versions: list[Version] = []
+    for entry in directory.iterdir():
+        if not entry.is_file():
+            continue
+        inferred = _discover_semver_from_name(entry.name)
+        if inferred is not None:
+            versions.append(inferred)
+
+    return versions
+
+
+def _compute_target_version() -> Version:
+    """Determine the latest schema version from migration definitions."""
+
+    directory = _migration_directory()
+    versions = list(_iter_migration_versions(directory))
+    if versions:
+        return max(versions)
+
+    fallback = max(SCHEMA_VERSION_MAP.values())
+    _LOGGER.debug(
+        "No semantic migration files found in %s; falling back to %s", directory, fallback
+    )
+    return fallback
+
+
+TARGET_SCHEMA_VERSION: Version = _compute_target_version()
 """Latest schema version expressed as :class:`~packaging.version.Version`."""
 
 TARGET_SCHEMA_VERSION_STR: str = str(TARGET_SCHEMA_VERSION)
 """Latest schema version expressed as a string."""
+
+TARGET_SCHEMA_USER_VERSION: int = max(SCHEMA_VERSION_MAP)
+"""Latest known ``user_version`` value."""
 
 def _int_to_version(value: int) -> Version:
     """Convert an integer ``user_version`` to a :class:`Version` instance."""
@@ -180,6 +245,20 @@ def get_db_version(connection: sqlite3.Connection) -> Version:
 
 
 def get_target_version() -> Version:
-    """Return the schema version expected by the current application."""
+    """アプリケーションが到達すべき最新スキーマバージョンを返します。
+
+    入力
+        引数はありません。
+    出力
+        :class:`Version`
+            マイグレーション定義から推測した最大セマンティックバージョン。
+    処理概要
+        1. ``db/migrations`` 配下のファイル名から ``V<major>.<minor>.<patch>__`` 形式の
+           バージョンを収集します。
+        2. 一つでも検出できた場合は最大値を返し、見つからない場合は既知の
+           :data:`SCHEMA_VERSION_MAP` から最大値をフォールバックとして返します。
+    例外
+        なし。
+    """
 
     return TARGET_SCHEMA_VERSION
