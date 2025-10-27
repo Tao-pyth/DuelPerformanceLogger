@@ -63,6 +63,11 @@ class FFmpegRecorder:
     # ------------------------------------------------------------------
     # Recording lifecycle
     # ------------------------------------------------------------------
+    def is_running(self) -> bool:
+        """現在録画プロセスが稼働中かを返します。"""
+
+        return self._process is not None and self._process.poll() is None
+
     def start(self, match_id: int | None = None) -> Path:
         if self._process is not None:
             raise RecordingError("A recording is already running")
