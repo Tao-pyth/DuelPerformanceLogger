@@ -17,7 +17,7 @@ import os
 import base64
 import sqlite3
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 import eel
 
@@ -33,8 +33,9 @@ from app.function import (
 from app.function.cmn_config import load_config
 from app.function.cmn_logger import log_db_error
 from app.function.cmn_resources import get_text
-from app.function.core import paths, versioning
+from app.function.core import config_handler, paths, ui_notify, versioning
 from app.function.core.backup_restore import RestoreReport
+from app.function.core.recorder import FFmpegRecorder, RecordingError, RecordingResult
 from app.function.core.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,10 @@ class DuelPerformanceService:
             3. マイグレーション状態に応じてメッセージとタイムスタンプを保持します。
         """
         self.config = load_config()
+        self.recording_settings = config_handler.load_recording_settings()
+        self._recorder: FFmpegRecorder | None = None
+        self._last_recording_result: RecordingResult | None = None
+        self._last_screenshot_path: str | None = None
         self.db = DatabaseManager()
         try:
             self.db.ensure_database()
@@ -176,6 +181,122 @@ class DuelPerformanceService:
         self.db.set_metadata("last_migration_message_at", timestamp_iso)
         self.migration_result = message
         self.migration_timestamp = timestamp_iso
+
+    # ------------------------------------------------------------------
+    # Recording operations
+    # ------------------------------------------------------------------
+    def _set_recording_settings(
+        self,
+        settings: config_handler.RecordingSettings,
+        *,
+        persist: bool = True,
+    ) -> None:
+        """録画設定をサービスへ適用し、必要に応じて ``app_settings.json`` へ保存します。"""
+
+        self.recording_settings = settings
+        self.recording_settings.ensure_directories()
+        self._recorder = None
+        if persist:
+            root = config_handler.load_app_settings()
+            container = config_handler.update_recording_settings(
+                self.recording_settings, root
+            )
+            config_handler.save_app_settings(container)
+
+    def _ensure_recorder(self) -> FFmpegRecorder:
+        """録画処理に使用する :class:`FFmpegRecorder` を生成・キャッシュします。"""
+
+        if self._recorder is None:
+            self._recorder = FFmpegRecorder(
+                self.recording_settings,
+                database=self.db,
+            )
+        return self._recorder
+
+    def recording_snapshot(self) -> dict[str, Any]:
+        """録画設定と直近の実行結果を辞書化して返します。"""
+
+        recorder = self._recorder
+        is_recording = recorder.is_running() if recorder else False
+        last_recording: dict[str, Any] | None = None
+        if self._last_recording_result is not None:
+            last_recording = {
+                "path": str(self._last_recording_result.file_path),
+                "status": self._last_recording_result.status,
+                "profile": self._last_recording_result.profile.name,
+                "fps": self._last_recording_result.fps,
+                "bitrate": self._last_recording_result.bitrate,
+            }
+
+        return {
+            "settings": self.recording_settings.to_dict(),
+            "is_recording": is_recording,
+            "active_profile": self.recording_settings.profile,
+            "last_recording": last_recording,
+            "last_screenshot": self._last_screenshot_path,
+        }
+
+    def update_recording_settings(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """録画設定を更新して永続化後のスナップショットを返します。"""
+
+        current = self.recording_settings.to_dict()
+        merged = {key: current.get(key) for key in current}
+        for key, value in payload.items():
+            if key in merged:
+                merged[key] = value
+
+        settings = config_handler.RecordingSettings.from_mapping(merged)
+        self._set_recording_settings(settings)
+        logger.info("Recording settings updated: profile=%s", settings.profile)
+        return self.recording_snapshot()
+
+    def start_recording(
+        self,
+        *,
+        match_id: int | None = None,
+        profile: str | None = None,
+    ) -> str:
+        """録画を開始し、生成されたファイルパスを文字列で返します。"""
+
+        if profile and profile != self.recording_settings.profile:
+            merged = self.recording_settings.to_dict()
+            merged["profile"] = profile
+            settings = config_handler.RecordingSettings.from_mapping(merged)
+            self._set_recording_settings(settings)
+
+        recorder = self._ensure_recorder()
+        output_path = recorder.start(match_id=match_id)
+        self._last_recording_result = None
+        logger.info(
+            "Recording started (match_id=%s, profile=%s, path=%s)",
+            match_id,
+            self.recording_settings.profile,
+            output_path,
+        )
+        return str(output_path)
+
+    def stop_recording(self, *, match_id: int | None = None) -> RecordingResult:
+        """進行中の録画を停止し、:class:`RecordingResult` を返します。"""
+
+        recorder = self._ensure_recorder()
+        result = recorder.stop(match_id=match_id)
+        self._last_recording_result = result
+        logger.info(
+            "Recording stopped (status=%s, path=%s)",
+            result.status,
+            result.file_path,
+        )
+        return result
+
+    def take_screenshot(self, *, match_id: int | None = None) -> str:
+        """スクリーンショットを取得し、保存先パスを返します。"""
+
+        recorder = self._ensure_recorder()
+        name = f"match_{match_id}" if match_id is not None else None
+        path = recorder.capture_screenshot(name=name)
+        self._last_screenshot_path = str(path)
+        logger.info("Screenshot captured (match_id=%s, path=%s)", match_id, path)
+        return str(path)
 
     # ------------------------------------------------------------------
     # Application operations
@@ -864,6 +985,17 @@ def _build_snapshot(state: Optional[AppState] = None) -> dict[str, Any]:
     snapshot_source = state or get_app_state()
     data = snapshot_source.snapshot()
     data["version"] = __version__
+    if _SERVICE is not None:
+        data["recording"] = _SERVICE.recording_snapshot()
+    else:
+        fallback_settings = config_handler.load_recording_settings()
+        data["recording"] = {
+            "settings": fallback_settings.to_dict(),
+            "is_recording": False,
+            "active_profile": fallback_settings.profile,
+            "last_recording": None,
+            "last_screenshot": None,
+        }
     return data
 
 
@@ -899,6 +1031,62 @@ def _operation_response(service: DuelPerformanceService, func) -> dict[str, Any]
         return {"ok": True, "snapshot": snapshot}
 
 
+def _coerce_optional_int(value: Any) -> int | None:
+    """整数へ変換可能な値を受け取り、未指定なら ``None`` を返します。"""
+
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("数値を指定してください") from exc
+
+
+def _coerce_bool(value: Any) -> bool:
+    """多様な入力を真偽値へ変換します。"""
+
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "on"}
+
+
+def _normalize_recording_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """録画設定フォームの入力をサニタイズして辞書へまとめます。"""
+
+    normalized: dict[str, Any] = {}
+
+    if "save_directory" in payload:
+        normalized["save_directory"] = str(payload["save_directory"]).strip()
+    if "bitrate" in payload:
+        normalized["bitrate"] = str(payload["bitrate"]).strip()
+    if "audio_bitrate" in payload:
+        normalized["audio_bitrate"] = str(payload["audio_bitrate"]).strip()
+    if "fps" in payload:
+        try:
+            normalized["fps"] = int(payload["fps"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("FPS は整数で指定してください") from exc
+    if "profile" in payload:
+        normalized["profile"] = str(payload["profile"]).strip()
+    if "ffmpeg_path" in payload:
+        normalized["ffmpeg_path"] = str(payload["ffmpeg_path"]).strip()
+    if "auto_download_ffmpeg" in payload:
+        normalized["auto_download_ffmpeg"] = _coerce_bool(
+            payload["auto_download_ffmpeg"]
+        )
+    if "audio_device" in payload:
+        normalized["audio_device"] = str(payload["audio_device"]).strip()
+    if "video_source" in payload:
+        normalized["video_source"] = str(payload["video_source"]).strip()
+
+    return normalized
+
+
 @eel.expose
 def fetch_snapshot() -> dict[str, Any]:
     """フロントエンドへ最新スナップショットを返します。
@@ -916,6 +1104,109 @@ def fetch_snapshot() -> dict[str, Any]:
     service = _ensure_service()
     state = service.refresh_state()
     return _build_snapshot(state)
+
+
+@eel.expose
+def get_recording_status() -> dict[str, Any]:
+    """録画設定および稼働状況を返します。"""
+
+    service = _ensure_service()
+    return {"ok": True, "recording": service.recording_snapshot()}
+
+
+@eel.expose
+def update_recording_settings(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """録画設定フォームの内容を保存します。"""
+
+    service = _ensure_service()
+    try:
+        normalized = _normalize_recording_payload(payload or {})
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    snapshot = service.update_recording_settings(normalized)
+    ui_notify.notify("録画設定を保存しました", duration=2.4)
+    return {"ok": True, "recording": snapshot}
+
+
+@eel.expose
+def start_recording(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """録画を開始します。"""
+
+    service = _ensure_service()
+    payload = payload or {}
+    profile = payload.get("profile")
+    try:
+        match_id = _coerce_optional_int(payload.get("match_id"))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    try:
+        path = service.start_recording(match_id=match_id, profile=profile)
+    except (RecordingError, ValueError) as exc:
+        logger.warning("Failed to start recording: %s", exc, exc_info=True)
+        ui_notify.notify("録画開始に失敗しました", duration=3.6)
+        return {"ok": False, "error": str(exc)}
+
+    ui_notify.notify("録画を開始しました", duration=2.4)
+    return {"ok": True, "path": path, "recording": service.recording_snapshot()}
+
+
+@eel.expose
+def stop_recording(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """進行中の録画を停止します。"""
+
+    service = _ensure_service()
+    payload = payload or {}
+    try:
+        match_id = _coerce_optional_int(payload.get("match_id"))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    try:
+        result = service.stop_recording(match_id=match_id)
+    except RecordingError as exc:
+        logger.warning("Failed to stop recording: %s", exc, exc_info=True)
+        ui_notify.notify("録画停止に失敗しました", duration=3.6)
+        return {"ok": False, "error": str(exc)}
+
+    message = (
+        "録画を停止しました"
+        if result.status == "completed"
+        else "録画を停止しました（破損を検知）"
+    )
+    ui_notify.notify(message, duration=3.0)
+    response_result = {
+        "path": str(result.file_path),
+        "status": result.status,
+        "profile": result.profile.name,
+        "fps": result.fps,
+        "bitrate": result.bitrate,
+        "duration": result.duration,
+    }
+    return {"ok": True, "result": response_result, "recording": service.recording_snapshot()}
+
+
+@eel.expose
+def take_screenshot(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """スクリーンショットを取得します。"""
+
+    service = _ensure_service()
+    payload = payload or {}
+    try:
+        match_id = _coerce_optional_int(payload.get("match_id"))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    try:
+        path = service.take_screenshot(match_id=match_id)
+    except (RecordingError, OSError) as exc:
+        logger.warning("Failed to capture screenshot: %s", exc, exc_info=True)
+        ui_notify.notify("スクリーンショットの取得に失敗しました", duration=3.6)
+        return {"ok": False, "error": str(exc)}
+
+    ui_notify.notify("スクリーンショットを保存しました", duration=2.4)
+    return {"ok": True, "path": path, "recording": service.recording_snapshot()}
 
 
 @eel.expose
