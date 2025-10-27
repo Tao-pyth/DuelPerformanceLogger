@@ -206,6 +206,20 @@ def log_dir() -> Path:
     return _ensure_subdir("logs")
 
 
+def recording_log_root() -> Path:
+    """録画ログを格納するルートディレクトリを返します。"""
+
+    path = log_dir() / "recording"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def recording_output_dir() -> Path:
+    """録画ファイルの既定保存先ディレクトリを返します。"""
+
+    return _ensure_subdir("recordings")
+
+
 def backup_dir() -> Path:
     """バックアップファイルを格納するディレクトリを返します。
 
@@ -250,6 +264,12 @@ def config_path(filename: str = "config.conf") -> Path:
     """
 
     return config_dir() / filename
+
+
+def app_settings_path() -> Path:
+    """ユーザー設定 JSON ファイルのパスを返します。"""
+
+    return config_dir() / "app_settings.json"
 
 
 def default_config_path() -> Path:
@@ -302,9 +322,12 @@ __all__ = [
     "backup_dir",
     "config_dir",
     "config_path",
+    "app_settings_path",
     "database_dir",
     "default_config_path",
     "log_dir",
+    "recording_log_root",
+    "recording_output_dir",
     "package_root",
     "project_root",
     "resource_path",

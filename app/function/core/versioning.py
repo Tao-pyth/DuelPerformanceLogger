@@ -96,7 +96,7 @@ def _iter_migration_versions(directory: Path) -> Iterable[Version]:
     return versions
 
 
-def _compute_target_version() -> Version:
+def _compute_target_version(fallback: Version | None = None) -> Version:
     """Determine the latest schema version from migration definitions."""
 
     directory = _migration_directory()
@@ -104,11 +104,13 @@ def _compute_target_version() -> Version:
     if versions:
         return max(versions)
 
-    fallback = max(SCHEMA_VERSION_MAP.values())
+    fallback_version = fallback or max(SCHEMA_VERSION_MAP.values())
     _LOGGER.debug(
-        "No semantic migration files found in %s; falling back to %s", directory, fallback
+        "No semantic migration files found in %s; falling back to %s",
+        directory,
+        fallback_version,
     )
-    return fallback
+    return fallback_version
 
 
 TARGET_SCHEMA_VERSION: Version = _compute_target_version()
@@ -244,21 +246,16 @@ def get_db_version(connection: sqlite3.Connection) -> Version:
     return TARGET_SCHEMA_VERSION
 
 
-def get_target_version() -> Version:
-    """アプリケーションが到達すべき最新スキーマバージョンを返します。
+def get_target_version(current: Version | str | int | None = None) -> Version:
+    """Return the latest schema version inferred from migration definitions.
 
-    入力
-        引数はありません。
-    出力
-        :class:`Version`
-            マイグレーション定義から推測した最大セマンティックバージョン。
-    処理概要
-        1. ``db/migrations`` 配下のファイル名から ``V<major>.<minor>.<patch>__`` 形式の
-           バージョンを収集します。
-        2. 一つでも検出できた場合は最大値を返し、見つからない場合は既知の
-           :data:`SCHEMA_VERSION_MAP` から最大値をフォールバックとして返します。
-    例外
-        なし。
+    Parameters
+    ----------
+    current:
+        Optional hint representing the *current* database schema version.  When
+        semantic migration files are unavailable, this value is used as the
+        fallback expectation to avoid reporting an upgrade requirement.
     """
 
-    return TARGET_SCHEMA_VERSION
+    fallback = coerce_version(current) if current is not None else None
+    return _compute_target_version(fallback=fallback)

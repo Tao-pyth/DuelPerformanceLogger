@@ -107,16 +107,16 @@ class DuelPerformanceService:
             self.migration_result = self._handle_startup_migration_failure(exc)
 
         # --- バージョン整合性チェック（既存ハンドラ利用） ---
-        expected_version = self._expected_schema_version()
+        target_version = self._expected_schema_version()
         current_version = self.db.get_schema_version()
         current_semver = versioning.coerce_version(current_version)
         target_semver = versioning.coerce_version(
-            expected_version, fallback=current_semver
+            target_version, fallback=current_semver
         )
 
         if current_semver < target_semver:
             self.migration_result = self._handle_version_mismatch(
-                current_version, expected_version
+                current_version, target_version
             )
         elif current_semver == target_semver:
             message = get_text("settings.db_migration_up_to_date")
@@ -125,7 +125,7 @@ class DuelPerformanceService:
         else:
             # DB 側がターゲットより新しい場合は明示的にスキップメッセージのみ通知する。
             message = get_text("settings.db_migration_upper_detected").format(
-                current=current_version, expected=expected_version
+                current=current_version, target=target_version
             )
             self._record_migration_message(message)
 
@@ -652,13 +652,13 @@ class DuelPerformanceService:
             )
         return lines
 
-    def _handle_version_mismatch(self, current_version: str, expected_version: str) -> str:
+    def _handle_version_mismatch(self, current_version: str, target_version: str) -> str:
         """スキーマバージョン不一致時のバックアップ/復元処理を実行します。
 
         入力
             current_version: ``str``
                 DB に記録されているスキーマバージョン。
-            expected_version: ``str``
+            target_version: ``str``
                 アプリが期待するスキーマバージョン。
         出力
             ``str``
@@ -671,7 +671,7 @@ class DuelPerformanceService:
 
         lines = [
             get_text("settings.db_migration_detected").format(
-                current=current_version, expected=expected_version
+                current=current_version, target=target_version
             )
         ]
         timestamp_iso = datetime.now().astimezone().isoformat()
@@ -685,7 +685,7 @@ class DuelPerformanceService:
             self.db.record_backup_path(backup_path)
 
             self.db.initialize_database()
-            self.db.set_schema_version(expected_version)
+            self.db.set_schema_version(target_version)
 
             try:
                 report = self.db.import_backup(backup_path)
