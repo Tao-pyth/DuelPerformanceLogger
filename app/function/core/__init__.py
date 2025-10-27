@@ -16,4 +16,10 @@ __all__ = [
     "backup_restore",
     "csv_schema_map",
     "migration_runner",
+    "config_handler",
+    "ffmpeg_command_builder",
+    "file_sanitizer",
+    "record_integrity",
+    "recorder",
+    "session_logging",
 ]
