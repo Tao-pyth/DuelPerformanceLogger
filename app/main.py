@@ -33,7 +33,8 @@ from app.function import (
 from app.function.cmn_config import load_config
 from app.function.cmn_logger import log_db_error
 from app.function.cmn_resources import get_text
-from app.function.core import paths
+from app.function.core import paths, versioning
+from app.function.core.backup_restore import RestoreReport
 from app.function.core.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -108,19 +109,25 @@ class DuelPerformanceService:
         # --- バージョン整合性チェック（既存ハンドラ利用） ---
         expected_version = self._expected_schema_version()
         current_version = self.db.get_schema_version()
-        if current_version != expected_version:
+        current_semver = versioning.coerce_version(current_version)
+        target_semver = versioning.coerce_version(
+            expected_version, fallback=current_semver
+        )
+
+        if current_semver < target_semver:
             self.migration_result = self._handle_version_mismatch(
                 current_version, expected_version
             )
+        elif current_semver == target_semver:
+            message = get_text("settings.db_migration_up_to_date")
+            self._record_migration_message(message)
+            self.db.set_schema_version(target_semver)
         else:
-            # 直近マイグレーションの説明を拾っておく（存在すれば）
-            self.migration_result = self.db.get_metadata("last_migration_message", "") or ""
-
-        # 期待 version を記録（観測/診断用途。実スキーマは ensure_database/_migrate_schema により整合）
-        self.db.set_schema_version(expected_version)
-        self.migration_timestamp = (
-            self.db.get_metadata("last_migration_message_at", "") or ""
-        )
+            # DB 側がターゲットより新しい場合は明示的にスキップメッセージのみ通知する。
+            message = get_text("settings.db_migration_upper_detected").format(
+                current=current_version, expected=expected_version
+            )
+            self._record_migration_message(message)
 
         # --- 起動後の AppState 構築 ---
         return self.refresh_state()
@@ -146,6 +153,29 @@ class DuelPerformanceService:
             migration_timestamp=self.migration_timestamp,
         )
         return set_app_state(state)
+
+    def _record_migration_message(self, message: str) -> None:
+        """マイグレーション結果メッセージをメタデータと状態へ記録します。
+
+        入力
+            message: ``str``
+                ユーザーへ提示するメッセージ本文。
+        出力
+            ``None``
+                副作用としてメタデータおよび :class:`AppState` 相当の属性を更新します。
+        処理概要
+            1. 現在時刻を取得し ISO 形式でタイムスタンプを作成します。
+            2. ``last_migration_message``/``last_migration_message_at`` メタデータへ保存します。
+            3. :attr:`migration_result` と :attr:`migration_timestamp` を更新します。
+        例外
+            なし。
+        """
+
+        timestamp_iso = datetime.now().astimezone().isoformat()
+        self.db.set_metadata("last_migration_message", message)
+        self.db.set_metadata("last_migration_message_at", timestamp_iso)
+        self.migration_result = message
+        self.migration_timestamp = timestamp_iso
 
     # ------------------------------------------------------------------
     # Application operations
@@ -543,22 +573,20 @@ class DuelPerformanceService:
         state = self.refresh_state()
         return archive_name, encoded, timestamp_iso, state
 
-    def import_backup_archive(self, archive_bytes: bytes) -> tuple[dict[str, int], AppState]:
-        """バックアップアーカイブを取り込み状態を更新します。
+    def import_backup_archive(
+        self,
+        archive_bytes: bytes,
+        *,
+        mode: str = "full",
+        dry_run: bool = False,
+    ) -> tuple[RestoreReport, AppState]:
+        """バックアップアーカイブを取り込み状態を更新します。"""
 
-        入力
-            archive_bytes: ``bytes``
-                ZIP 形式バックアップのバイナリデータ。
-        出力
-            ``tuple[dict[str, int], AppState]``
-                復元件数の辞書と復元後の状態。
-        処理概要
-            1. :meth:`DatabaseManager.import_backup_archive` で ZIP を復元。
-            2. :meth:`refresh_state` を呼び最新状態を取得します。
-        """
-        restored = self.db.import_backup_archive(archive_bytes)
+        report = self.db.import_backup_archive(
+            archive_bytes, mode=mode, dry_run=dry_run
+        )
         state = self.refresh_state()
-        return restored, state
+        return report, state
 
     def reset_database(self) -> AppState:
         """データベースを初期化し状態を再構築します。
@@ -603,6 +631,27 @@ class DuelPerformanceService:
             expected_version_raw, fallback=DatabaseManager.CURRENT_SCHEMA_VERSION
         )
 
+    def _format_restore_lines(self, report: RestoreReport) -> list[str]:
+        """復元結果をユーザー通知用メッセージへ整形します。"""
+
+        lines = [
+            get_text("settings.db_migration_restore_success").format(
+                decks=report.restored.get("decks", 0),
+                seasons=report.restored.get("seasons", 0),
+                matches=report.restored.get("matches", 0),
+            ),
+            get_text("settings.db_restore_failure_count").format(
+                count=len(report.failures)
+            ),
+        ]
+        if report.log_path:
+            lines.append(
+                get_text("settings.db_restore_log_path").format(
+                    path=str(report.log_path)
+                )
+            )
+        return lines
+
     def _handle_version_mismatch(self, current_version: str, expected_version: str) -> str:
         """スキーマバージョン不一致時のバックアップ/復元処理を実行します。
 
@@ -639,7 +688,7 @@ class DuelPerformanceService:
             self.db.set_schema_version(expected_version)
 
             try:
-                restored = self.db.import_backup(backup_path)
+                report = self.db.import_backup(backup_path)
             except DatabaseError as exc:
                 log_db_error(
                     "Failed to restore database during migration",
@@ -651,18 +700,25 @@ class DuelPerformanceService:
                         error=str(exc)
                     )
                 )
+                last_report = self.db.last_restore_report
+                if last_report:
+                    lines.append(
+                        get_text("settings.db_restore_failure_count").format(
+                            count=len(last_report.failures)
+                        )
+                    )
+                    if last_report.log_path:
+                        lines.append(
+                            get_text("settings.db_restore_log_path").format(
+                                path=str(last_report.log_path)
+                            )
+                        )
                 message = "\n".join(
                     [get_text("settings.db_migration_failure").format(error=str(exc))]
                     + lines
                 )
             else:
-                lines.append(
-                    get_text("settings.db_migration_restore_success").format(
-                        decks=restored.get("decks", 0),
-                        seasons=restored.get("seasons", 0),
-                        matches=restored.get("matches", 0),
-                    )
-                )
+                lines.extend(self._format_restore_lines(report))
                 message = "\n".join([get_text("settings.db_migration_success")] + lines)
         except Exception as exc:  # pragma: no cover - defensive fallback
             logger.exception("Unexpected error during schema migration")
@@ -722,7 +778,7 @@ class DuelPerformanceService:
 
         if backup_path is not None:
             try:
-                restored = self.db.import_backup(backup_path)
+                report = self.db.import_backup(backup_path)
             except DatabaseError as exc:
                 log_db_error(
                     "Failed to restore database during auto recovery",
@@ -734,14 +790,21 @@ class DuelPerformanceService:
                         error=str(exc)
                     )
                 )
-            else:
-                lines.append(
-                    get_text("settings.db_migration_restore_success").format(
-                        decks=restored.get("decks", 0),
-                        seasons=restored.get("seasons", 0),
-                        matches=restored.get("matches", 0),
+                last_report = self.db.last_restore_report
+                if last_report:
+                    lines.append(
+                        get_text("settings.db_restore_failure_count").format(
+                            count=len(last_report.failures)
+                        )
                     )
-                )
+                    if last_report.log_path:
+                        lines.append(
+                            get_text("settings.db_restore_log_path").format(
+                                path=str(last_report.log_path)
+                            )
+                        )
+            else:
+                lines.extend(self._format_restore_lines(report))
 
         message = "\n".join(lines)
         self.db.set_metadata("last_migration_message", message)
@@ -1222,13 +1285,23 @@ def import_backup_archive(payload: dict[str, Any]) -> dict[str, Any]:
         archive_bytes = base64.b64decode(content)
     except (TypeError, ValueError) as exc:
         return {"ok": False, "error": f"バックアップデータの形式が不正です: {exc}"}
+    mode = str(payload.get("mode", "full") or "full")
+    dry_run = bool(payload.get("dry_run", False))
     try:
-        restored, state = service.import_backup_archive(archive_bytes)
+        report, state = service.import_backup_archive(
+            archive_bytes, mode=mode, dry_run=dry_run
+        )
     except DatabaseError as exc:
         log_db_error("Failed to import backup archive", exc)
         return {"ok": False, "error": str(exc)}
     snapshot = _build_snapshot(state)
-    return {"ok": True, "restored": restored, "snapshot": snapshot}
+    return {
+        "ok": True,
+        "restored": report.restored,
+        "failures": len(report.failures),
+        "log_path": str(report.log_path) if report.log_path else "",
+        "snapshot": snapshot,
+    }
 
 
 @eel.expose
