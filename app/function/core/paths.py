@@ -206,6 +206,38 @@ def log_dir() -> Path:
     return _ensure_subdir("logs")
 
 
+def youtube_log_dir() -> Path:
+    """YouTube 連携専用のログディレクトリを返します。
+
+    入力
+        引数はありません。
+    出力
+        ``Path``
+            ``log_dir()/youtube`` のパス。
+    処理概要
+        1. :func:`log_dir` で親ディレクトリを生成し、その配下に ``youtube`` を作成します。
+    """
+
+    path = log_dir() / "youtube"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def recording_dir() -> Path:
+    """録画ファイルを保存するディレクトリを返します。
+
+    入力
+        引数はありません。
+    出力
+        ``Path``
+            ``user_data_root/recordings`` のパス。
+    処理概要
+        1. :func:`_ensure_subdir` を利用して ``recordings`` ディレクトリを生成します。
+    """
+
+    return _ensure_subdir("recordings")
+
+
 def backup_dir() -> Path:
     """バックアップファイルを格納するディレクトリを返します。
 
@@ -305,8 +337,10 @@ __all__ = [
     "database_dir",
     "default_config_path",
     "log_dir",
+    "youtube_log_dir",
     "package_root",
     "project_root",
+    "recording_dir",
     "resource_path",
     "resource_root",
     "strings_path",

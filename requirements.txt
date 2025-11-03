@@ -9,5 +9,7 @@
 # Core runtime dependencies
 Eel==0.16.0
     # via -r requirements.in
+google-api-python-client==2.121.0
+    # via -r requirements.in
 packaging==23.2
     # via -r requirements.in

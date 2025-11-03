@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here. Version numbers follow `DPL.<MAJOR>.<MINOR>.<PATCH>`.
 
+## [0.4.1] - 2025-10-19
+### Added
+- EN: Introduced optional YouTube uploads with API retries, manual URL overrides, and dedicated log files per session.
+- JP: YouTube API によるアップロード機能を追加し、再試行・手動 URL 登録・セッション単位の専用ログ出力に対応しました。
+- EN: Extended the web UI with status pills, retry controls, and recording path hints to monitor upload progress.
+- JP: Web UI にアップロード状態ピル、再試行ボタン、録画パス入力欄を追加し、進捗を可視化できるようにしました。
+
+### Changed
+- EN: Expanded the matches schema with `youtube_flag`, `youtube_video_id`, and `youtube_checked_at` columns and updated restore tooling accordingly.
+- JP: 対戦テーブルに `youtube_flag`・`youtube_video_id`・`youtube_checked_at` 列を追加し、復元ツールも新カラムへ対応させました。
+- EN: Updated configuration defaults to include YouTube templates, retry backoff controls, and bumped the app version to 0.4.1.
+- JP: 設定の既定値に YouTube 用テンプレートや再試行バックオフ値を追加し、アプリバージョンを 0.4.1 に更新しました。
+
+### Fixed
+- EN: Hardened YouTube upload logging so API errors generate per-status files without crashing the application.
+- JP: YouTube アップロードのエラーログ出力を強化し、API 失敗時でもアプリが落ちないよう改善しました。
+
 ## [0.3.3] - 2025-10-18
 ### Added
 - EN: Introduced a command line restore tool with `full`/`upsert` modes, dry-run support, and detailed reporting for backup archives.

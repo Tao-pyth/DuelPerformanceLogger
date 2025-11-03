@@ -112,7 +112,12 @@ SCHEMA_BY_TABLE: Mapping[str, TableSchema] = {
             ),
             "memo": ColumnSpec("memo", ColumnType.TEXT, nullable=False, default=""),
             "result": ColumnSpec("result", ColumnType.RESULT, nullable=False),
+            "youtube_flag": ColumnSpec(
+                "youtube_flag", ColumnType.INTEGER, nullable=False, default=0
+            ),
             "youtube_url": ColumnSpec("youtube_url", ColumnType.TEXT),
+            "youtube_video_id": ColumnSpec("youtube_video_id", ColumnType.TEXT),
+            "youtube_checked_at": ColumnSpec("youtube_checked_at", ColumnType.EPOCH),
             "favorite": ColumnSpec(
                 "favorite", ColumnType.BOOLEAN, nullable=False, default=0
             ),

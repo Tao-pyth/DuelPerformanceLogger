@@ -8,6 +8,7 @@ from pathlib import Path
 
 from app.function import DatabaseManager
 from app.function.core import backup_restore
+from app.function.core.youtube_types import YouTubeSyncFlag
 
 
 def _write_csv(path: Path, headers: list[str], rows: list[list[str]]) -> None:
@@ -54,7 +55,10 @@ def _prepare_csv_backup(base: Path) -> None:
             "keywords",
             "memo",
             "result",
+            "youtube_flag",
             "youtube_url",
+            "youtube_video_id",
+            "youtube_checked_at",
             "favorite",
             "created_at",
         ],
@@ -69,7 +73,10 @@ def _prepare_csv_backup(base: Path) -> None:
                 json.dumps(["tag"]),
                 "memo",
                 "win",
-                "",
+                str(int(YouTubeSyncFlag.MANUAL)),
+                "https://youtu.be/manual123",
+                "abc123",
+                "1700000100",
                 "1",
                 "1700000000",
             ]
@@ -92,10 +99,20 @@ def test_restore_from_directory_inserts_records(tmp_path: Path) -> None:
     assert report.log_path and report.log_path.exists()
 
     with sqlite3.connect(db_path) as connection:
-        deck_names = [row[0] for row in connection.execute("SELECT name FROM decks").fetchall()]
-        result = connection.execute("SELECT turn, result, favorite FROM matches").fetchone()
+        connection.row_factory = sqlite3.Row
+        deck_names = [row["name"] for row in connection.execute("SELECT name FROM decks").fetchall()]
+        result = connection.execute(
+            """
+            SELECT turn, result, favorite, youtube_flag, youtube_url, youtube_video_id, youtube_checked_at
+            FROM matches
+            """
+        ).fetchone()
     assert deck_names == ["Test Deck"]
-    assert result == (1, 1, 1)
+    assert (result["turn"], result["result"], result["favorite"]) == (1, 1, 1)
+    assert result["youtube_flag"] == int(YouTubeSyncFlag.MANUAL)
+    assert result["youtube_url"] == "https://youtu.be/manual123"
+    assert result["youtube_video_id"] == "abc123"
+    assert result["youtube_checked_at"] == 1700000100
 
 
 def test_restore_from_directory_dry_run_does_not_commit(tmp_path: Path) -> None:
