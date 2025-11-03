@@ -21,7 +21,6 @@ UI 層では辞書（dict）ベースのデータ構造だけを扱えるよう�
 from __future__ import annotations
 
 import csv
-import importlib.util
 import io
 import json
 import re
@@ -106,46 +105,6 @@ def migrate_031_to_032(db: "DatabaseManager") -> None:
         db._ensure_default_keywords(connection)
 
 
-<<<<<<< HEAD
-def _run_resource_check_migration(script_name: str, db: "DatabaseManager") -> None:
-    """`resource/db/migrations` 配下の Python マイグレーションを読み込んで実行します。"""
-
-    script_path = paths.resource_path("db", "migrations", script_name)
-    if not script_path.exists():
-        raise RuntimeError(f"Migration script not found: {script_path}")
-
-    spec = importlib.util.spec_from_file_location(
-        f"dpl_migration_{script_path.stem}", script_path
-    )
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Failed to load migration module: {script_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except Exception as exc:  # pragma: no cover - defensive
-        raise RuntimeError(f"Failed to execute migration module: {script_path}") from exc
-
-    candidate = getattr(module, "run", None) or getattr(module, "apply", None)
-    if not callable(candidate):
-        raise RuntimeError(
-            f"Migration module {script_path.name} lacks callable 'run' or 'apply'"
-        )
-
-    candidate(db)
-
-
-def migrate_032_to_033(db: "DatabaseManager") -> None:
-    """v0.3.3 への移行で整合性チェックのみを実行します。"""
-
-    _run_resource_check_migration("V0.3.3__checks_only.py", db)
-
-
-def migrate_033_to_040(db: "DatabaseManager") -> None:
-    """v0.4.0 への移行で整合性チェックのみを実行します。"""
-
-    _run_resource_check_migration("V0.4.0__checks_only.py", db)
-=======
 def migrate_032_to_041(db: "DatabaseManager") -> None:
     """Add YouTube integration columns introduced in v0.4.1."""
 
@@ -155,7 +114,6 @@ def migrate_032_to_041(db: "DatabaseManager") -> None:
                 connection.execute(
                     "UPDATE matches SET youtube_flag = COALESCE(youtube_flag, 0)"
                 )
->>>>>>> origin/main
 
 
 def migrate_legacy_to_020(db: "DatabaseManager") -> None:
@@ -168,12 +126,7 @@ MIGRATION_CHAIN: list[MigrationStep] = [
     (Version("0.2.1"), Version("0.3.0"), migrate_021_to_030),
     (Version("0.3.0"), Version("0.3.1"), migrate_030_to_031),
     (Version("0.3.1"), Version("0.3.2"), migrate_031_to_032),
-<<<<<<< HEAD
-    (Version("0.3.2"), Version("0.3.3"), migrate_032_to_033),
-    (Version("0.3.3"), Version("0.4.0"), migrate_033_to_040),
-=======
     (Version("0.3.2"), Version("0.4.1"), migrate_032_to_041),
->>>>>>> origin/main
 ]
 
 

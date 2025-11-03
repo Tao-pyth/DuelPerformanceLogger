@@ -49,12 +49,7 @@ SCHEMA_VERSION_MAP: dict[int, Version] = {
     1: Version("0.3.0"),
     2: Version("0.3.1"),
     3: Version("0.3.2"),
-<<<<<<< HEAD
-    4: Version("0.3.3"),
-    5: Version("0.4.0"),
-=======
     4: Version("0.4.1"),
->>>>>>> origin/main
 }
 """Mapping of ``PRAGMA user_version`` integers to semantic Versions."""
 
@@ -110,13 +105,15 @@ def _iter_migration_versions(directory: Path) -> Iterable[Version]:
 def _compute_target_version(fallback: Version | None = None) -> Version:
     """Determine the latest schema version from migration definitions."""
 
-    directories = []
+    directories: list[Path] = []
     primary = _migration_directory()
     directories.append(primary)
 
-    project_dir = paths.project_root() / "db" / "migrations"
-    if project_dir not in directories:
-        directories.append(project_dir)
+    override_root = os.environ.get(_MIGRATION_ROOT_ENV)
+    if not override_root:
+        project_dir = paths.project_root() / "db" / "migrations"
+        if project_dir not in directories:
+            directories.append(project_dir)
 
     versions: list[Version] = []
     for directory in directories:

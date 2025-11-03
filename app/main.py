@@ -17,13 +17,9 @@ import logging
 import os
 import sqlite3
 from datetime import datetime
-<<<<<<< HEAD
-from typing import Any, Mapping, Optional
-=======
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from urllib.parse import parse_qs, urlparse
->>>>>>> origin/main
 
 import eel
 

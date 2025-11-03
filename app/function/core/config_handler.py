@@ -24,7 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_APP_SETTINGS: dict[str, Any] = {
     "recording": {
-        "save_directory": str(paths.recording_output_dir()),
+        "save_directory": str(paths.recording_dir()),
         "bitrate": "6000k",
         "audio_bitrate": "160k",
         "fps": 60,
