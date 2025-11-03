@@ -85,6 +85,46 @@ body {
   border-color: rgba(255, 255, 255, 0.36);
 }
 
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--foreground);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.status-pill--idle {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.status-pill--warning {
+  background: rgba(255, 196, 0, 0.2);
+  color: #ffe17a;
+}
+
+.status-pill--success {
+  background: rgba(22, 163, 74, 0.28);
+  color: #b9f5c8;
+}
+
+.status-pill--danger {
+  background: rgba(239, 68, 68, 0.28);
+  color: #ffb4b4;
+}
+
+.status-pill--info {
+  background: rgba(79, 141, 209, 0.28);
+  color: #d6e9ff;
+}
+
 .nav-button {
   min-width: 180px;
   text-align: center;
@@ -188,6 +228,18 @@ legend {
 .form-field textarea {
   resize: vertical;
   min-height: 96px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .form-field select[multiple],
@@ -451,6 +503,70 @@ legend {
   flex-wrap: wrap;
   gap: 8px;
   min-height: 32px;
+}
+
+.match-detail-youtube {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.match-detail-youtube__status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.match-detail-youtube__checked {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.85rem;
+}
+
+.match-detail-youtube__link {
+  min-height: 24px;
+  word-break: break-all;
+  font-size: 0.95rem;
+}
+
+.match-detail-youtube__link a {
+  color: #8ec7ff;
+  text-decoration: underline;
+}
+
+.match-detail-youtube__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.match-detail-youtube__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.match-detail-youtube__field input[type="url"] {
+  width: 100%;
+}
+
+.match-detail-youtube__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.match-detail-youtube__recording {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.26);
+  background: rgba(15, 17, 26, 0.4);
+  color: var(--foreground);
+  font-size: 0.95rem;
+}
+
+.match-detail-youtube__recording::placeholder {
+  color: rgba(255, 255, 255, 0.5);
 }
 
 #match-detail-memo {

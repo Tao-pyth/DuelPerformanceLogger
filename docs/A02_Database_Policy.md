@@ -43,25 +43,25 @@ SQLite が標準で外部キー制約を無効化している点を踏まえ、�
 - Avoid storing local time offsets in the database; convert to local time only at the presentation layer。ローカル時刻への変換は UI レイヤーで行います。
 - Include timezone awareness in migration scripts and fixtures to prevent accidental localtime inserts during テスト。テストデータでも UTC 変換を徹底します。
 
-## Schema Overview (v0.1.1) / スキーマ概要（v0.1.1）
-データベース初期構築およびマイグレーション後に保証されるテーブル構成を以下に示します。`schema_version="0.1.1"` は
-アプリのセマンティックバージョン `0.1.1` を保持します。
+## Schema Overview (v0.4.1) / スキーマ概要（v0.4.1）
+データベース初期構築およびマイグレーション後に保証されるテーブル構成を以下に示します。`schema_version="0.4.1"` は
+アプリのセマンティックバージョン `0.4.1` を保持します。
 
 | Table | 主用途 / Purpose | 主なカラム | 補足 | 初期値 |
 |-------|------------------|------------|------|--------|
 | `decks` | デッキ情報登録画面 | `name` (UNIQUE), `description` (TEXT), `usage_count` (INTEGER) | `usage_count` は登録済み対戦ログから再計算され、既定値は 0。| `usage_count=0` |
 | `opponent_decks` | 対戦相手デッキ情報登録画面 | `name` (UNIQUE), `usage_count` (INTEGER) | プルダウン表示用。対戦登録時に自動追加・加算。| `usage_count=0` |
 | `keywords` | 対戦キーワード管理 | `identifier` (UNIQUE), `name` (UNIQUE), `description` (TEXT), `usage_count` (INTEGER), `created_at` (UTC epoch) | `identifier` は内部用 UUID。`usage_count` は対戦データ登録時に集計。| `usage_count=0` |
-| `matches` | 対戦情報登録 | `match_no`, `deck_name`, `turn` (先攻=True/後攻=False), `opponent_deck`, `keywords` (JSON), `result` (-1/0/1), `youtube_url` (TEXT), `favorite` (INTEGER), `created_at` (UTC epoch) | `keywords` は JSON 配列。`youtube_url` は長めの URL (最大 2048 文字) を許容。`favorite` は 1/0 のフラグ。| `created_at=STRFTIME('%s','now')` |
+| `matches` | 対戦情報登録 | `match_no`, `deck_name`, `turn` (先攻=True/後攻=False), `opponent_deck`, `keywords` (JSON), `result` (-1/0/1), `youtube_flag` (INTEGER), `youtube_url` (TEXT), `youtube_video_id` (TEXT), `youtube_checked_at` (UTC epoch), `favorite` (INTEGER), `created_at` (UTC epoch) | `keywords` は JSON 配列。`youtube_flag` は `YouTubeSyncFlag` の整数値で状態（未送信/再試行/送信中/完了/手動）を表し、`youtube_checked_at` は最終更新時刻を UTC 秒で保存。`youtube_url` は最大 2048 文字を許容。| `created_at=STRFTIME('%s','now')` |
 | `seasons` | シーズン管理（将来拡張） | `name`, `description`, `start_date`, `start_time`, `end_date`, `end_time` | 空でも動作。 | `description=''` |
-| `db_metadata` | 設定情報 | `schema_version`, `ui_mode`, `last_backup` | `ui_mode` は `normal` を既定値とし、マイグレーション完了後に `schema_version="0.1.1"` を記録。| `ui_mode='normal'` |
+| `db_metadata` | 設定情報 | `schema_version`, `ui_mode`, `last_backup` | `ui_mode` は `normal` を既定値とし、マイグレーション完了後に `schema_version="0.4.1"` を記録。| `ui_mode='normal'` |
 
 `DatabaseManager.ensure_database()` は起動時に以下を自動実施します。
 
 1. 必須テーブルとカラム（`decks.usage_count`、`opponent_decks.usage_count` など）の存在チェック。
 2. 欠落時の `ALTER TABLE` / `CREATE TABLE` 実行。
 3. `matches` を基準に `usage_count` を再計算し整合性を確保。
-4. メタデータへ最新スキーマバージョン (`"0.1.1"`) を保存。
+4. メタデータへ最新スキーマバージョン (`"0.4.1"`) を保存。
 
 
 ## <a id="backup-strategy"></a>Backup Strategy / バックアップ戦略
@@ -92,4 +92,4 @@ SQLite が標準で外部キー制約を無効化している点を踏まえ、�
 - [ ] バックアップ ZIP に最新バージョン番号が含まれている。
 - [ ] マイグレーションテストが CI で実行されている。
 
-**Last Updated:** 2025-10-12
+**Last Updated:** 2025-10-19

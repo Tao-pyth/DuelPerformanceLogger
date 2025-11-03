@@ -12,12 +12,18 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
-import base64
 import sqlite3
 from datetime import datetime
+<<<<<<< HEAD
 from typing import Any, Mapping, Optional
+=======
+from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import parse_qs, urlparse
+>>>>>>> origin/main
 
 import eel
 
@@ -37,6 +43,10 @@ from app.function.core import config_handler, paths, ui_notify, versioning
 from app.function.core.backup_restore import RestoreReport
 from app.function.core.recorder import FFmpegRecorder, RecordingError, RecordingResult
 from app.function.core.version import __version__
+from app.function.core.youtube_uploader import (
+    YouTubeUploadError,
+    YouTubeUploader,
+)
 
 logger = logging.getLogger(__name__)
 _WEB_ROOT = paths.web_root()
@@ -75,6 +85,7 @@ class DuelPerformanceService:
         self._last_recording_result: RecordingResult | None = None
         self._last_screenshot_path: str | None = None
         self.db = DatabaseManager()
+        self.youtube_uploader: YouTubeUploader | None = None
         try:
             self.db.ensure_database()
         except (sqlite3.DatabaseError, DatabaseError) as exc:
@@ -651,7 +662,12 @@ class DuelPerformanceService:
             raise ValueError("対戦情報 ID が不正です")
         updates = dict(payload or {})
         updates.pop("id", None)
+        manual_url = updates.pop("youtube_url", None)
         self.db.update_match(match_id, updates)
+        if manual_url is not None:
+            sanitized = self.db._sanitize_youtube_url(manual_url)
+            video_id = self._extract_youtube_video_id(sanitized) if sanitized else ""
+            self.db.record_youtube_manual(match_id, sanitized, video_id)
         return self.refresh_state()
 
     def delete_match(self, match_id: int) -> AppState:
@@ -671,6 +687,64 @@ class DuelPerformanceService:
         if match_id <= 0:
             raise ValueError("対戦情報 ID が不正です")
         self.db.delete_match(match_id)
+        return self.refresh_state()
+
+    def retry_youtube_upload(
+        self, match_id: int, recording_path: str | None = None
+    ) -> AppState:
+        """YouTube アップロードを再試行して状態を更新します。"""
+
+        if match_id <= 0:
+            raise ValueError("対戦情報 ID が不正です")
+        if not self._youtube_enabled():
+            raise ValueError("YouTube 連携は無効化されています")
+
+        match = self.db.fetch_match(match_id)
+        uploader = self._ensure_youtube_uploader()
+        video_path = self._resolve_recording_path(match, recording_path)
+        settings = self._youtube_settings()
+        title_template = settings.get(
+            "title_template", "{deck} vs {opponent} ({date})"
+        )
+        description_template = settings.get(
+            "description_template",
+            "Duel result: {result}\nDeck: {deck}\nSeason: {season}",
+        )
+        context = self._match_template_context(match)
+        title = self._render_youtube_template(title_template, context)
+        description = self._render_youtube_template(description_template, context)
+        privacy = str(settings.get("default_privacy", "unlisted") or "unlisted")
+
+        self.db.record_youtube_in_progress(match_id)
+        try:
+            result = uploader.upload_video(
+                video_path, title, description, privacy_status=privacy
+            )
+        except FileNotFoundError as exc:
+            self.db.record_youtube_failure(match_id)
+            raise ValueError(f"録画ファイルが見つかりません: {video_path}") from exc
+        except YouTubeUploadError as exc:
+            self.db.record_youtube_failure(match_id)
+            logger.error("YouTube upload failed", exc_info=exc)
+            raise ValueError(f"YouTube へのアップロードに失敗しました: {exc}") from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            self.db.record_youtube_failure(match_id)
+            logger.error("Unexpected error during YouTube upload", exc_info=exc)
+            raise DatabaseError("YouTube アップロード中に予期しないエラーが発生しました") from exc
+
+        self.db.record_youtube_success(match_id, result.url, result.video_id)
+        if result.log_path:
+            self.db.set_metadata("youtube_last_log", str(result.log_path))
+        return self.refresh_state()
+
+    def set_youtube_url(self, match_id: int, url: str) -> AppState:
+        """手動で指定された YouTube URL を登録します。"""
+
+        if match_id <= 0:
+            raise ValueError("対戦情報 ID が不正です")
+        sanitized = self.db._sanitize_youtube_url(url)
+        video_id = self._extract_youtube_video_id(sanitized) if sanitized else ""
+        self.db.record_youtube_manual(match_id, sanitized, video_id)
         return self.refresh_state()
 
     def generate_backup_archive(self) -> tuple[str, str, str, AppState]:
@@ -751,6 +825,165 @@ class DuelPerformanceService:
         return DatabaseManager.normalize_schema_version(
             expected_version_raw, fallback=DatabaseManager.CURRENT_SCHEMA_VERSION
         )
+
+    def _youtube_settings(self) -> dict[str, Any]:
+        settings = self.config.get("youtube", {})
+        return dict(settings) if isinstance(settings, dict) else {}
+
+    def _youtube_enabled(self) -> bool:
+        settings = self._youtube_settings()
+        value = settings.get("enabled", False)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on", "t", "y"}
+        return bool(value)
+
+    def _ensure_youtube_uploader(self) -> YouTubeUploader:
+        if self.youtube_uploader is not None:
+            return self.youtube_uploader
+
+        settings = self._youtube_settings()
+        api_key = str(settings.get("api_key", "") or "").strip()
+        if not api_key:
+            raise ValueError("YouTube API キーが設定されていません")
+
+        upload_dir_setting = settings.get("upload_directory")
+        if upload_dir_setting:
+            base_dir = Path(str(upload_dir_setting)).expanduser()
+        else:
+            base_dir = paths.recording_dir()
+
+        uploader = YouTubeUploader(
+            api_key=api_key,
+            upload_dir=base_dir,
+            default_privacy=str(settings.get("default_privacy", "unlisted") or "unlisted"),
+        )
+        self.youtube_uploader = uploader
+        return uploader
+
+    def _resolve_recording_path(
+        self, match: dict[str, Any], recording_path: str | None
+    ) -> Path:
+        settings = self._youtube_settings()
+        base_dir_setting = settings.get("upload_directory")
+        base_dir = (
+            Path(str(base_dir_setting)).expanduser()
+            if base_dir_setting
+            else paths.recording_dir()
+        )
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        if recording_path:
+            candidate = Path(recording_path).expanduser()
+            if not candidate.is_absolute():
+                candidate = base_dir / candidate
+            if candidate.exists():
+                return candidate
+            raise ValueError(f"録画ファイルが見つかりません: {candidate}")
+
+        for candidate in self._candidate_recording_paths(base_dir, match):
+            if candidate.exists():
+                return candidate
+        raise ValueError("録画ファイルが見つかりません。ファイルパスを指定してください")
+
+    def _candidate_recording_paths(
+        self, base_dir: Path, match: dict[str, Any]
+    ) -> list[Path]:
+        names: list[str] = []
+        seen: set[str] = set()
+
+        match_id = match.get("id")
+        if match_id:
+            names.extend([str(match_id), f"match_{match_id}"])
+
+        match_no = match.get("match_no")
+        if match_no:
+            names.extend([str(match_no), f"match_{match_no}"])
+
+        created_at = match.get("created_at") or ""
+        if created_at:
+            try:
+                timestamp = datetime.fromisoformat(str(created_at)).astimezone()
+            except ValueError:
+                timestamp = None
+            if timestamp is not None:
+                for fmt in ("%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S", "%Y%m%d%H%M%S"):
+                    names.append(timestamp.strftime(fmt))
+
+        candidates: list[Path] = []
+        for name in names:
+            clean = str(name or "").strip()
+            if not clean or clean in seen:
+                continue
+            seen.add(clean)
+            for ext in (".mp4", ".mkv", ".mov"):
+                candidate = (base_dir / f"{clean}{ext}").resolve()
+                if candidate not in candidates:
+                    candidates.append(candidate)
+        return candidates
+
+    def _match_template_context(self, match: dict[str, Any]) -> dict[str, str]:
+        created_at = str(match.get("created_at") or "")
+        display_date = created_at
+        if created_at:
+            try:
+                timestamp = datetime.fromisoformat(created_at).astimezone()
+                display_date = timestamp.strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                display_date = created_at
+
+        turn_label = "先攻" if match.get("turn") else "後攻"
+        result_label = self._format_result_label(match.get("result"))
+
+        return {
+            "deck": str(match.get("deck_name", "") or ""),
+            "opponent": str(match.get("opponent_deck", "") or ""),
+            "date": display_date,
+            "result": result_label,
+            "result_label": result_label,
+            "season": str(match.get("season_name", "") or ""),
+            "match_no": str(match.get("match_no", "") or ""),
+            "id": str(match.get("id", "") or ""),
+            "turn": turn_label,
+        }
+
+    def _render_youtube_template(self, template: str, context: dict[str, str]) -> str:
+        class _SafeDict(dict):
+            def __missing__(self, key: str) -> str:  # pragma: no cover - fallback
+                return ""
+
+        safe_context = {key: str(value or "") for key, value in context.items()}
+        try:
+            return template.format_map(_SafeDict(safe_context))
+        except (KeyError, ValueError):
+            return template
+
+    def _extract_youtube_video_id(self, url: str) -> str:
+        text = (url or "").strip()
+        if not text:
+            return ""
+        parsed = urlparse(text)
+        host = parsed.netloc.lower()
+        if host.endswith("youtu.be"):
+            slug = parsed.path.strip("/")
+            return slug.split("/")[0] if slug else ""
+        if "youtube" in host:
+            query = parse_qs(parsed.query)
+            video_candidates = query.get("v")
+            if video_candidates:
+                return video_candidates[0]
+            path_parts = [part for part in parsed.path.strip("/").split("/") if part]
+            if len(path_parts) >= 2 and path_parts[0] in {"shorts", "live", "embed"}:
+                return path_parts[1]
+        return ""
+
+    @staticmethod
+    def _format_result_label(value: object) -> str:
+        try:
+            numeric = int(value)
+        except (TypeError, ValueError):
+            return "Unknown"
+        mapping = {1: "Win", -1: "Lose", 0: "Draw"}
+        return mapping.get(numeric, "Unknown")
 
     def _format_restore_lines(self, report: RestoreReport) -> list[str]:
         """復元結果をユーザー通知用メッセージへ整形します。"""
@@ -1495,6 +1728,41 @@ def update_match(payload: dict[str, Any]) -> dict[str, Any]:
     updates = dict(payload)
     updates.pop("id", None)
     return _operation_response(service, lambda: service.update_match(match_id, updates))
+
+
+@eel.expose
+def retry_youtube_upload(payload: dict[str, Any]) -> dict[str, Any]:
+    """YouTube アップロード再試行リクエストを処理します。"""
+
+    service = _ensure_service()
+    payload = payload or {}
+    match_id_raw = payload.get("id")
+    try:
+        match_id = int(match_id_raw)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "対戦情報 ID が不正です"}
+
+    recording_path = str(payload.get("recording_path", "") or "").strip() or None
+    return _operation_response(
+        service,
+        lambda: service.retry_youtube_upload(match_id, recording_path=recording_path),
+    )
+
+
+@eel.expose
+def set_youtube_url(payload: dict[str, Any]) -> dict[str, Any]:
+    """YouTube URL の手動登録リクエストを処理します。"""
+
+    service = _ensure_service()
+    payload = payload or {}
+    match_id_raw = payload.get("id")
+    try:
+        match_id = int(match_id_raw)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "対戦情報 ID が不正です"}
+
+    url = str(payload.get("url", "") or "").strip()
+    return _operation_response(service, lambda: service.set_youtube_url(match_id, url))
 
 
 @eel.expose

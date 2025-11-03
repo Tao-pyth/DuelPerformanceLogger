@@ -2,6 +2,7 @@
 
 All notable changes to this project are documented here. Version numbers follow `DPL.<MAJOR>.<MINOR>.<PATCH>`.
 
+<<<<<<< HEAD
 ## [0.4.0] - 2025-10-27
 ### Added
 - EN: FFmpeg recording core capable of handling consent-based auto-download, start/stop controls, and screenshots from the desktop capture pipeline.
@@ -14,6 +15,24 @@ All notable changes to this project are documented here. Version numbers follow 
 - JP: 録画設定 UI が保存先ディレクトリ・ビットレート・FPS を `app_settings.json` に保存し、フロントエンドとバックエンドの設定を同期するようになりました。
 - EN: FFmpeg session logs are rotated per session under `/log/recording/`, and migration logs surface the single-line `[DB] current=... target=...` status during startup.
 - JP: FFmpeg セッションログを `/log/recording/` 配下でセッション単位に出力し、起動ログに `[DB] current=... target=...` の単一行を表示するよう変更しました。
+=======
+## [0.4.1] - 2025-10-19
+### Added
+- EN: Introduced optional YouTube uploads with API retries, manual URL overrides, and dedicated log files per session.
+- JP: YouTube API によるアップロード機能を追加し、再試行・手動 URL 登録・セッション単位の専用ログ出力に対応しました。
+- EN: Extended the web UI with status pills, retry controls, and recording path hints to monitor upload progress.
+- JP: Web UI にアップロード状態ピル、再試行ボタン、録画パス入力欄を追加し、進捗を可視化できるようにしました。
+
+### Changed
+- EN: Expanded the matches schema with `youtube_flag`, `youtube_video_id`, and `youtube_checked_at` columns and updated restore tooling accordingly.
+- JP: 対戦テーブルに `youtube_flag`・`youtube_video_id`・`youtube_checked_at` 列を追加し、復元ツールも新カラムへ対応させました。
+- EN: Updated configuration defaults to include YouTube templates, retry backoff controls, and bumped the app version to 0.4.1.
+- JP: 設定の既定値に YouTube 用テンプレートや再試行バックオフ値を追加し、アプリバージョンを 0.4.1 に更新しました。
+
+### Fixed
+- EN: Hardened YouTube upload logging so API errors generate per-status files without crashing the application.
+- JP: YouTube アップロードのエラーログ出力を強化し、API 失敗時でもアプリが落ちないよう改善しました。
+>>>>>>> origin/main
 
 ## [0.3.3] - 2025-10-18
 ### Added

@@ -25,7 +25,16 @@ _DEFAULT_CONFIG_PATH = paths.default_config_path()
 DEFAULT_CONFIG: dict[str, Any] = {
     "database": {
         # Schema version is tracked as a semantic-version string (e.g., "0.1.1").
-        "expected_version": "0.3.2",
+        "expected_version": "0.4.1",
+    },
+    "youtube": {
+        "enabled": "false",
+        "api_key": "",
+        "default_privacy": "unlisted",
+        "title_template": "{deck} vs {opponent} ({date})",
+        "description_template": "Duel result: {result}\\nDeck: {deck}\\nSeason: {season}",
+        "retry.max_attempts": "3",
+        "retry.backoff_sec": "15",
     },
 }
 

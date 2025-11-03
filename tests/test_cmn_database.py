@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.function.cmn_database import DatabaseManager
+from app.function.core.youtube_types import YouTubeSyncFlag
 
 
 @pytest.fixture()
@@ -39,9 +40,13 @@ def test_initialize_database_preserves_existing_data(temp_db: Path) -> None:
     with manager._connect() as connection:
         decks = connection.execute("SELECT name FROM decks").fetchall()
         matches = connection.execute("SELECT memo FROM matches").fetchall()
+        youtube_row = connection.execute(
+            "SELECT youtube_flag, youtube_url, youtube_video_id, youtube_checked_at FROM matches"
+        ).fetchone()
 
     assert [row["name"] for row in decks] == ["Test Deck"]
     assert [row["memo"] for row in matches] == ["note"]
+    assert tuple(youtube_row) == (0, "", None, None)
 
 
 def test_migration_updates_user_version_and_preserves_data(temp_db: Path) -> None:
@@ -108,15 +113,98 @@ def test_migration_updates_user_version_and_preserves_data(temp_db: Path) -> Non
             "columns": [row[1] for row in connection.execute("PRAGMA table_info(matches)")],
             "user_version": connection.execute("PRAGMA user_version").fetchone()[0],
         }
-        rows = connection.execute("SELECT memo, favorite, youtube_url FROM matches").fetchone()
+        rows = connection.execute(
+            """
+            SELECT memo, favorite, youtube_flag, youtube_url, youtube_video_id, youtube_checked_at
+            FROM matches
+            """
+        ).fetchone()
 
     backup_files = list(temp_db.parent.glob("duel_performance_backup_*.sqlite3"))
 
     assert schema_info["user_version"] == DatabaseManager.SCHEMA_VERSION
     assert "memo" in schema_info["columns"]
-    assert tuple(rows) == ("", 0, "")
+    assert rows["memo"] == ""
+    assert rows["favorite"] == 0
+    assert rows["youtube_flag"] == 0
+    assert rows["youtube_url"] == ""
+    assert rows["youtube_video_id"] in {"", None}
+    if rows["youtube_checked_at"] is not None:
+        assert isinstance(rows["youtube_checked_at"], int)
     assert backup_files, "Expected migration backup file to be created"
     assert manager.get_schema_version() == DatabaseManager.CURRENT_SCHEMA_VERSION
+
+
+def test_record_youtube_state_transitions(temp_db: Path) -> None:
+    manager = DatabaseManager(temp_db)
+    manager.ensure_database()
+
+    with manager.transaction() as connection:
+        deck_id = connection.execute(
+            "INSERT INTO decks (name, description) VALUES (?, ?)",
+            ("Deck", ""),
+        ).lastrowid
+        match_id = connection.execute(
+            """
+            INSERT INTO matches (match_no, deck_id, season_id, turn, opponent_deck, keywords, memo, result)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, deck_id, None, 0, "Opponent", json.dumps([]), "", 1),
+        ).lastrowid
+
+    manager.record_youtube_in_progress(match_id)
+    with manager._connect() as connection:
+        row = connection.execute(
+            "SELECT youtube_flag, youtube_url, youtube_video_id, youtube_checked_at FROM matches WHERE id = ?",
+            (match_id,),
+        ).fetchone()
+    assert row["youtube_flag"] == YouTubeSyncFlag.IN_PROGRESS
+    assert row["youtube_url"] == ""
+    assert row["youtube_video_id"] == ""
+    assert isinstance(row["youtube_checked_at"], int)
+
+    manager.record_youtube_success(match_id, " https://youtu.be/abc123 ", "abc123")
+    with manager._connect() as connection:
+        row = connection.execute(
+            "SELECT youtube_flag, youtube_url, youtube_video_id, youtube_checked_at FROM matches WHERE id = ?",
+            (match_id,),
+        ).fetchone()
+    assert row["youtube_flag"] == YouTubeSyncFlag.COMPLETED
+    assert row["youtube_url"] == "https://youtu.be/abc123"
+    assert row["youtube_video_id"] == "abc123"
+    assert isinstance(row["youtube_checked_at"], int)
+
+    manager.record_youtube_failure(match_id)
+    with manager._connect() as connection:
+        row = connection.execute(
+            "SELECT youtube_flag, youtube_url, youtube_video_id, youtube_checked_at FROM matches WHERE id = ?",
+            (match_id,),
+        ).fetchone()
+    assert row["youtube_flag"] == YouTubeSyncFlag.NEEDS_RETRY
+    assert row["youtube_url"] == ""
+    assert row["youtube_video_id"] == ""
+    assert isinstance(row["youtube_checked_at"], int)
+
+    manager.record_youtube_manual(match_id, " https://www.youtube.com/watch?v=xyz789 ", "xyz789")
+    with manager._connect() as connection:
+        row = connection.execute(
+            "SELECT youtube_flag, youtube_url, youtube_video_id, youtube_checked_at FROM matches WHERE id = ?",
+            (match_id,),
+        ).fetchone()
+    assert row["youtube_flag"] == YouTubeSyncFlag.MANUAL
+    assert row["youtube_url"] == "https://www.youtube.com/watch?v=xyz789"
+    assert row["youtube_video_id"] == "xyz789"
+    assert isinstance(row["youtube_checked_at"], int)
+
+    manager.record_youtube_manual(match_id, "", None)
+    with manager._connect() as connection:
+        row = connection.execute(
+            "SELECT youtube_flag, youtube_url, youtube_video_id FROM matches WHERE id = ?",
+            (match_id,),
+        ).fetchone()
+    assert row["youtube_flag"] == YouTubeSyncFlag.NOT_REQUESTED
+    assert row["youtube_url"] == ""
+    assert row["youtube_video_id"] == ""
 
 
 def test_e2e_restart_keeps_data(temp_db: Path) -> None:
