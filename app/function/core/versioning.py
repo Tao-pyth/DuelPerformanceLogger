@@ -49,6 +49,7 @@ SCHEMA_VERSION_MAP: dict[int, Version] = {
     1: Version("0.3.0"),
     2: Version("0.3.1"),
     3: Version("0.3.2"),
+    4: Version("0.4.1"),
 }
 """Mapping of ``PRAGMA user_version`` integers to semantic Versions."""
 

@@ -47,7 +47,13 @@ const matchDetailTurnEl = document.getElementById("match-detail-turn");
 const matchDetailOpponentEl = document.getElementById("match-detail-opponent");
 const matchDetailKeywordsEl = document.getElementById("match-detail-keywords");
 const matchDetailMemoEl = document.getElementById("match-detail-memo");
-const matchDetailYoutubeEl = document.getElementById("match-detail-youtube");
+const matchDetailYoutubeStatusEl = document.getElementById("match-detail-youtube-status");
+const matchDetailYoutubeCheckedAtEl = document.getElementById("match-detail-youtube-checked-at");
+const matchDetailYoutubeLinkEl = document.getElementById("match-detail-youtube-link");
+const matchDetailYoutubeInputEl = document.getElementById("match-detail-youtube-input");
+const matchDetailYoutubeSaveButton = document.getElementById("match-detail-youtube-save");
+const matchDetailYoutubeRetryButton = document.getElementById("match-detail-youtube-retry");
+const matchDetailRecordingPathInput = document.getElementById("match-detail-recording-path");
 const matchDetailFavoriteEl = document.getElementById("match-detail-favorite");
 const matchDetailEditButton = document.getElementById("match-detail-edit");
 const matchEditForm = document.getElementById("match-edit-form");
@@ -70,6 +76,14 @@ const opponentAnalysisFilter = document.getElementById("opponent-analysis-filter
 const opponentAnalysisSummaryEl = document.getElementById("opponent-analysis-summary");
 const opponentAnalysisTableBody = document.querySelector("#opponent-analysis-table tbody");
 const opponentAnalysisChartCanvas = document.getElementById("opponent-analysis-chart");
+
+const YOUTUBE_STATUS_MAP = {
+  0: { label: "未送信", tone: "idle" },
+  1: { label: "再試行待ち", tone: "danger" },
+  2: { label: "送信中...", tone: "warning" },
+  3: { label: "送信完了", tone: "success" },
+  4: { label: "手動登録済", tone: "info" },
+};
 
 const viewElements = new Map();
 let currentView = "dashboard";
@@ -356,6 +370,16 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(byte);
   });
   return btoa(binary);
+}
+
+function setYoutubeStatus(element, flag) {
+  if (!element) {
+    return;
+  }
+  const status = YOUTUBE_STATUS_MAP[flag] ?? YOUTUBE_STATUS_MAP[0];
+  element.textContent = status.label;
+  element.className = `status-pill status-pill--${status.tone}`;
+  element.dataset.tone = status.tone;
 }
 
 function formatDateTime(value) {
@@ -1208,8 +1232,26 @@ function renderMatchDetail(detail) {
       matchDetailMemoEl.innerHTML = "";
       matchDetailMemoEl.textContent = "-";
     }
-    if (matchDetailYoutubeEl) {
-      matchDetailYoutubeEl.textContent = "―";
+    if (matchDetailYoutubeStatusEl) {
+      setYoutubeStatus(matchDetailYoutubeStatusEl, 0);
+    }
+    if (matchDetailYoutubeCheckedAtEl) {
+      matchDetailYoutubeCheckedAtEl.textContent = "―";
+    }
+    if (matchDetailYoutubeLinkEl) {
+      matchDetailYoutubeLinkEl.textContent = "―";
+    }
+    if (matchDetailYoutubeInputEl) {
+      matchDetailYoutubeInputEl.value = "";
+    }
+    if (matchDetailYoutubeSaveButton) {
+      matchDetailYoutubeSaveButton.disabled = true;
+    }
+    if (matchDetailYoutubeRetryButton) {
+      matchDetailYoutubeRetryButton.disabled = true;
+    }
+    if (matchDetailRecordingPathInput) {
+      matchDetailRecordingPathInput.value = "";
     }
     matchDetailFavoriteEl.textContent = "-";
     if (matchDetailEditButton) {
@@ -1265,18 +1307,41 @@ function renderMatchDetail(detail) {
     }
   }
 
-  if (matchDetailYoutubeEl) {
-    matchDetailYoutubeEl.innerHTML = "";
+  if (matchDetailYoutubeStatusEl) {
+    setYoutubeStatus(matchDetailYoutubeStatusEl, detail.youtube_flag ?? 0);
+  }
+  const youtubeFlagValue = Number(detail.youtube_flag ?? 0);
+  if (matchDetailYoutubeCheckedAtEl) {
+    matchDetailYoutubeCheckedAtEl.textContent = detail.youtube_checked_at
+      ? formatDateTime(detail.youtube_checked_at)
+      : "―";
+  }
+  if (matchDetailYoutubeLinkEl) {
+    matchDetailYoutubeLinkEl.innerHTML = "";
     if (detail.youtube_url) {
       const link = document.createElement("a");
       link.href = detail.youtube_url;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       link.textContent = detail.youtube_url;
-      matchDetailYoutubeEl.appendChild(link);
+      matchDetailYoutubeLinkEl.appendChild(link);
     } else {
-      matchDetailYoutubeEl.textContent = "―";
+      matchDetailYoutubeLinkEl.textContent = "―";
     }
+  }
+  if (matchDetailYoutubeInputEl) {
+    matchDetailYoutubeInputEl.value = detail.youtube_url || "";
+  }
+  if (matchDetailYoutubeSaveButton) {
+    matchDetailYoutubeSaveButton.disabled = !hasEel;
+  }
+  if (matchDetailYoutubeRetryButton) {
+    const disableRetry =
+      !hasEel || youtubeFlagValue === 2 || youtubeFlagValue === 3 || youtubeFlagValue === 4;
+    matchDetailYoutubeRetryButton.disabled = disableRetry;
+  }
+  if (matchDetailRecordingPathInput) {
+    matchDetailRecordingPathInput.value = "";
   }
 
   matchDetailFavoriteEl.textContent = detail.favorite ? "はい" : "いいえ";
@@ -2236,6 +2301,75 @@ if (matchListTableBody) {
 if (matchDetailEditButton) {
   matchDetailEditButton.addEventListener("click", () => {
     openMatchEditView();
+  });
+}
+
+if (matchDetailYoutubeSaveButton) {
+  matchDetailYoutubeSaveButton.addEventListener("click", async () => {
+    if (!currentMatchDetail) {
+      showNotification("対戦情報が選択されていません", 3600);
+      return;
+    }
+    if (!hasEel) {
+      showNotification("YouTube URL の更新は現在利用できません", 4200);
+      return;
+    }
+    const url = matchDetailYoutubeInputEl?.value.trim() ?? "";
+    const originalLabel = matchDetailYoutubeSaveButton.textContent;
+    matchDetailYoutubeSaveButton.disabled = true;
+    matchDetailYoutubeSaveButton.textContent = "保存中...";
+    try {
+      const response = await callPy("set_youtube_url", {
+        id: currentMatchDetail.id,
+        url,
+      });
+      if (handleOperationResponse(response, "YouTube URL を更新しました")) {
+        await showMatchDetail(currentMatchDetail.id, { pushHistory: false, navigate: false });
+      }
+    } catch (error) {
+      handleError(error, "YouTube URL の更新に失敗しました", {
+        context: "set_youtube_url",
+      });
+    } finally {
+      matchDetailYoutubeSaveButton.disabled = false;
+      matchDetailYoutubeSaveButton.textContent = originalLabel;
+    }
+  });
+}
+
+if (matchDetailYoutubeRetryButton) {
+  matchDetailYoutubeRetryButton.addEventListener("click", async () => {
+    if (!currentMatchDetail) {
+      showNotification("対戦情報が選択されていません", 3600);
+      return;
+    }
+    if (!hasEel) {
+      showNotification("YouTube 再試行は現在利用できません", 4200);
+      return;
+    }
+    const recordingPath = matchDetailRecordingPathInput?.value.trim() ?? "";
+    const originalLabel = matchDetailYoutubeRetryButton.textContent;
+    matchDetailYoutubeRetryButton.disabled = true;
+    matchDetailYoutubeRetryButton.textContent = "再試行中...";
+    try {
+      const response = await callPy("retry_youtube_upload", {
+        id: currentMatchDetail.id,
+        recording_path: recordingPath,
+      });
+      if (handleOperationResponse(response, "YouTube アップロードを再試行しました")) {
+        if (matchDetailRecordingPathInput) {
+          matchDetailRecordingPathInput.value = "";
+        }
+        await showMatchDetail(currentMatchDetail.id, { pushHistory: false, navigate: false });
+      }
+    } catch (error) {
+      handleError(error, "YouTube アップロードの再試行に失敗しました", {
+        context: "retry_youtube_upload",
+      });
+    } finally {
+      matchDetailYoutubeRetryButton.disabled = false;
+      matchDetailYoutubeRetryButton.textContent = originalLabel;
+    }
   });
 }
 

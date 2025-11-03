@@ -26,6 +26,7 @@ import json
 import re
 import shutil
 import sqlite3
+import time
 import uuid
 import zipfile
 from collections import Counter
@@ -37,6 +38,7 @@ from typing import Callable, Iterable, Iterator, Optional
 from packaging.version import Version
 
 from app.function.core import backup_restore, paths, versioning
+from app.function.core.youtube_types import YouTubeSyncFlag
 
 from .cmn_logger import log_error
 
@@ -103,6 +105,17 @@ def migrate_031_to_032(db: "DatabaseManager") -> None:
         db._ensure_default_keywords(connection)
 
 
+def migrate_032_to_041(db: "DatabaseManager") -> None:
+    """Add YouTube integration columns introduced in v0.4.1."""
+
+    with db.transaction() as connection:
+        if db._table_exists(connection, "matches"):
+            if db._ensure_youtube_columns(connection):
+                connection.execute(
+                    "UPDATE matches SET youtube_flag = COALESCE(youtube_flag, 0)"
+                )
+
+
 def migrate_legacy_to_020(db: "DatabaseManager") -> None:
     # 旧版→0.2.0 のベースへ。構造補完は _migrate_schema 前段で済むため実処理は不要。
     pass
@@ -113,6 +126,7 @@ MIGRATION_CHAIN: list[MigrationStep] = [
     (Version("0.2.1"), Version("0.3.0"), migrate_021_to_030),
     (Version("0.3.0"), Version("0.3.1"), migrate_030_to_031),
     (Version("0.3.1"), Version("0.3.2"), migrate_031_to_032),
+    (Version("0.3.2"), Version("0.4.1"), migrate_032_to_041),
 ]
 
 
@@ -389,6 +403,7 @@ class DatabaseManager:
                 )
 
         if self._table_exists(connection, "matches"):
+            self._ensure_youtube_columns(connection)
             if not self._column_exists(connection, "matches", "memo"):
                 connection.execute(
                     "ALTER TABLE matches ADD COLUMN memo TEXT NOT NULL DEFAULT ''"
@@ -396,10 +411,6 @@ class DatabaseManager:
             if not self._column_exists(connection, "matches", "favorite"):
                 connection.execute(
                     "ALTER TABLE matches ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0"
-                )
-            if not self._column_exists(connection, "matches", "youtube_url"):
-                connection.execute(
-                    "ALTER TABLE matches ADD COLUMN youtube_url TEXT DEFAULT ''"
                 )
             if not self._column_exists(connection, "matches", "created_at"):
                 connection.execute(
@@ -421,6 +432,36 @@ class DatabaseManager:
             )
 
         self._ensure_default_keywords(connection)
+
+    def _ensure_youtube_columns(self, connection: sqlite3.Connection) -> bool:
+        """YouTube 連携に必要なカラムを確保し、変更有無を返します。"""
+
+        changed = False
+        if not self._column_exists(connection, "matches", "youtube_url"):
+            connection.execute(
+                "ALTER TABLE matches ADD COLUMN youtube_url TEXT DEFAULT ''"
+            )
+            changed = True
+        if not self._column_exists(connection, "matches", "youtube_flag"):
+            connection.execute(
+                "ALTER TABLE matches ADD COLUMN youtube_flag INTEGER NOT NULL DEFAULT 0"
+            )
+            changed = True
+        if not self._column_exists(connection, "matches", "youtube_video_id"):
+            connection.execute(
+                "ALTER TABLE matches ADD COLUMN youtube_video_id TEXT"
+            )
+            changed = True
+        if not self._column_exists(connection, "matches", "youtube_checked_at"):
+            connection.execute(
+                "ALTER TABLE matches ADD COLUMN youtube_checked_at INTEGER"
+            )
+            changed = True
+
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_matches_youtube_flag ON matches(youtube_flag)"
+        )
+        return changed
 
     def _create_backup_copy(self) -> Path:
         """Create a timestamped backup of the current database file."""
@@ -730,10 +771,7 @@ class DatabaseManager:
                         "CREATE INDEX IF NOT EXISTS idx_matches_season_id ON matches(season_id)"
                     )
                     schema_changed = True
-                if not self._column_exists(connection, "matches", "youtube_url"):
-                    connection.execute(
-                        "ALTER TABLE matches ADD COLUMN youtube_url TEXT DEFAULT ''"
-                    )
+                if self._ensure_youtube_columns(connection):
                     schema_changed = True
                 if not self._column_exists(connection, "matches", "favorite"):
                     connection.execute(
@@ -1009,7 +1047,7 @@ class DatabaseManager:
                     "COALESCE(s.rank_statistics_target, 0) AS rank_statistics_target, "
                     "m.turn, "
                     "m.opponent_deck, m.keywords, m.memo, m.result, m.created_at, "
-                    "m.youtube_url, m.favorite "
+                    "m.youtube_flag, m.youtube_url, m.youtube_video_id, m.youtube_checked_at, m.favorite "
                     "FROM matches AS m "
                     "JOIN decks AS d ON d.id = m.deck_id "
                     "LEFT JOIN seasons AS s ON s.id = m.season_id"
@@ -1055,7 +1093,7 @@ class DatabaseManager:
             "COALESCE(s.rank_statistics_target, 0) AS rank_statistics_target, "
             "m.turn, "
             "m.opponent_deck, m.keywords, m.memo, m.result, m.created_at, "
-            "m.youtube_url, m.favorite "
+            "m.youtube_flag, m.youtube_url, m.youtube_video_id, m.youtube_checked_at, m.favorite "
             "FROM matches AS m "
             "JOIN decks AS d ON d.id = m.deck_id "
             "LEFT JOIN seasons AS s ON s.id = m.season_id"
@@ -1222,7 +1260,21 @@ class DatabaseManager:
             raise DatabaseError("デッキ名を指定してください")
         opponent_name = str(record.get("opponent_deck", "")).strip()
         raw_keywords = record.get("keywords") or []
-        youtube_url = str(record.get("youtube_url", "") or "").strip()
+        youtube_url = self._sanitize_youtube_url(record.get("youtube_url", ""))
+        youtube_flag_input = record.get("youtube_flag", YouTubeSyncFlag.NOT_REQUESTED)
+        try:
+            youtube_flag = int(YouTubeSyncFlag(youtube_flag_input))
+        except ValueError:
+            try:
+                youtube_flag = int(youtube_flag_input)
+            except (TypeError, ValueError):
+                youtube_flag = int(YouTubeSyncFlag.NOT_REQUESTED)
+        youtube_video_id = str(record.get("youtube_video_id", "") or "").strip()
+        youtube_checked_at_value = record.get("youtube_checked_at")
+        try:
+            youtube_checked_at = int(youtube_checked_at_value)
+        except (TypeError, ValueError):
+            youtube_checked_at = None
         favorite_flag = 1 if bool(record.get("favorite")) else 0
         memo_value = str(record.get("memo", "") or "")
         season_id: Optional[int] = None
@@ -1269,10 +1321,13 @@ class DatabaseManager:
                         keywords,
                         memo,
                         result,
+                        youtube_flag,
                         youtube_url,
+                        youtube_video_id,
+                        youtube_checked_at,
                         favorite
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.get("match_no", 0),
@@ -1283,7 +1338,10 @@ class DatabaseManager:
                         keywords_json,
                         memo_value,
                         result_value,
+                        youtube_flag,
                         youtube_url,
+                        youtube_video_id,
+                        youtube_checked_at,
                         favorite_flag,
                     ),
                 )
@@ -1585,7 +1643,10 @@ class DatabaseManager:
                     m.memo,
                     m.result,
                     m.created_at,
+                    m.youtube_flag,
                     m.youtube_url,
+                    m.youtube_video_id,
+                    m.youtube_checked_at,
                     m.favorite
                 FROM matches AS m
                 JOIN decks AS d ON d.id = m.deck_id
@@ -1665,9 +1726,9 @@ class DatabaseManager:
             opponent_input = updates.get("opponent_deck", row["opponent_deck"] or "")
             opponent_name = str(opponent_input or "").strip()
 
-            youtube_url = str(updates.get("youtube_url", row["youtube_url"] or "") or "").strip()
-            if len(youtube_url) > 2048:
-                raise DatabaseError("YouTube URL は 2048 文字以内で入力してください")
+            youtube_url = self._sanitize_youtube_url(
+                updates.get("youtube_url", row["youtube_url"] or "")
+            )
 
             favorite_input = updates.get("favorite", bool(row["favorite"]))
             if isinstance(favorite_input, str):
@@ -1815,6 +1876,130 @@ class DatabaseManager:
                 )
 
         return self.fetch_match(match_id)
+
+    def record_youtube_in_progress(self, match_id: int) -> None:
+        """YouTube アップロード処理中であることを記録します。"""
+
+        timestamp = int(time.time())
+        with self.transaction() as connection:
+            self._update_youtube_metadata(
+                connection,
+                match_id,
+                flag=YouTubeSyncFlag.IN_PROGRESS,
+                checked_at=timestamp,
+            )
+
+    def record_youtube_success(self, match_id: int, url: str, video_id: str) -> None:
+        """YouTube アップロード成功を記録します。"""
+
+        timestamp = int(time.time())
+        sanitized_url = self._sanitize_youtube_url(url)
+        with self.transaction() as connection:
+            self._update_youtube_metadata(
+                connection,
+                match_id,
+                flag=YouTubeSyncFlag.COMPLETED,
+                url=sanitized_url,
+                video_id=str(video_id or "").strip(),
+                checked_at=timestamp,
+            )
+
+    def record_youtube_failure(self, match_id: int) -> None:
+        """YouTube アップロード失敗を記録し再試行対象にします。"""
+
+        timestamp = int(time.time())
+        with self.transaction() as connection:
+            self._update_youtube_metadata(
+                connection,
+                match_id,
+                flag=YouTubeSyncFlag.NEEDS_RETRY,
+                url="",
+                video_id="",
+                checked_at=timestamp,
+            )
+
+    def record_youtube_manual(self, match_id: int, url: str, video_id: str | None = None) -> None:
+        """手動で入力された YouTube URL を保存します。"""
+
+        timestamp = int(time.time())
+        sanitized_url = self._sanitize_youtube_url(url)
+        if sanitized_url:
+            flag = YouTubeSyncFlag.MANUAL
+            video_value = str(video_id or "").strip()
+        else:
+            flag = YouTubeSyncFlag.NOT_REQUESTED
+            video_value = ""
+        with self.transaction() as connection:
+            self._update_youtube_metadata(
+                connection,
+                match_id,
+                flag=flag,
+                url=sanitized_url,
+                video_id=video_value,
+                checked_at=timestamp,
+            )
+
+    def _update_youtube_metadata(
+        self,
+        connection: sqlite3.Connection,
+        match_id: int,
+        *,
+        flag: YouTubeSyncFlag | int | None = None,
+        url: str | None = None,
+        video_id: str | None = None,
+        checked_at: int | None = None,
+    ) -> None:
+        cursor = connection.execute(
+            "SELECT youtube_flag, youtube_url, youtube_video_id, youtube_checked_at FROM matches WHERE id = ?",
+            (match_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise DatabaseError("指定した対戦情報が見つかりません")
+
+        current_flag = int(row["youtube_flag"] or 0)
+        current_url = row["youtube_url"] or ""
+        current_video_id = row["youtube_video_id"] or ""
+        current_checked_at = row["youtube_checked_at"] if "youtube_checked_at" in row.keys() else None
+
+        if flag is not None:
+            if isinstance(flag, YouTubeSyncFlag):
+                current_flag = int(flag)
+            else:
+                try:
+                    current_flag = int(flag)
+                except (TypeError, ValueError):
+                    current_flag = int(YouTubeSyncFlag.NOT_REQUESTED)
+
+        if url is not None:
+            current_url = self._sanitize_youtube_url(url)
+
+        if video_id is not None:
+            current_video_id = str(video_id or "").strip()
+
+        if checked_at is not None:
+            try:
+                current_checked_at = int(checked_at)
+            except (TypeError, ValueError):
+                current_checked_at = None
+
+        connection.execute(
+            """
+            UPDATE matches
+            SET youtube_flag = ?,
+                youtube_url = ?,
+                youtube_video_id = ?,
+                youtube_checked_at = ?
+            WHERE id = ?
+            """,
+            (
+                current_flag,
+                current_url,
+                current_video_id,
+                current_checked_at,
+                match_id,
+            ),
+        )
 
     def delete_match(self, match_id: int) -> None:
         """対戦ログを削除し、関連する使用回数を更新する。"""
@@ -2111,6 +2296,36 @@ class DatabaseManager:
             keyword_lookup, keyword_ids
         )
 
+        youtube_flag_value = 0
+        if "youtube_flag" in row.keys():
+            try:
+                youtube_flag_value = int(row["youtube_flag"] or 0)
+            except (TypeError, ValueError):
+                youtube_flag_value = 0
+        try:
+            youtube_status = YouTubeSyncFlag(youtube_flag_value)
+        except ValueError:
+            youtube_status = YouTubeSyncFlag.NOT_REQUESTED
+
+        youtube_checked_iso = ""
+        youtube_checked_epoch: int | None = None
+        if "youtube_checked_at" in row.keys() and row["youtube_checked_at"] not in (None, ""):
+            try:
+                youtube_checked_epoch = int(row["youtube_checked_at"])
+            except (TypeError, ValueError):
+                youtube_checked_epoch = None
+            youtube_checked_iso = self._format_timestamp(row["youtube_checked_at"])
+
+        youtube_url_value = ""
+        if "youtube_url" in row.keys():
+            youtube_url_value = row["youtube_url"] or ""
+
+        youtube_video_id_value = ""
+        if "youtube_video_id" in row.keys():
+            youtube_video_id_value = row["youtube_video_id"] or ""
+
+        favorite_value = bool(row["favorite"]) if "favorite" in row.keys() else False
+
         return {
             "id": row["id"],
             "match_no": row["match_no"],
@@ -2126,8 +2341,13 @@ class DatabaseManager:
             "memo": row["memo"] or "",
             "result": self._decode_result(row["result"]),
             "created_at": self._format_timestamp(row["created_at"]),
-            "youtube_url": row["youtube_url"] or "",
-            "favorite": bool(row["favorite"]),
+            "youtube_flag": int(youtube_flag_value),
+            "youtube_status": youtube_status.name.lower(),
+            "youtube_url": youtube_url_value,
+            "youtube_video_id": youtube_video_id_value,
+            "youtube_checked_at": youtube_checked_iso,
+            "youtube_checked_at_epoch": youtube_checked_epoch,
+            "favorite": favorite_value,
         }
 
     def _build_keyword_lookups(
@@ -2265,6 +2485,15 @@ class DatabaseManager:
         except (TypeError, ValueError):
             return ""
         return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+    @staticmethod
+    def _sanitize_youtube_url(value: object) -> str:
+        """YouTube URL を 2048 文字以内に正規化します。"""
+
+        text = str(value or "").strip()
+        if len(text) > 2048:
+            raise DatabaseError("YouTube URL は 2048 文字以内で入力してください")
+        return text
 
     @staticmethod
     def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:

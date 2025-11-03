@@ -529,8 +529,40 @@
                 <dd id="match-detail-memo">-</dd>
               </div>
               <div>
-                <dt>YouTube URL</dt>
-                <dd id="match-detail-youtube">-</dd>
+                <dt>YouTube</dt>
+                <dd>
+                  <div class="match-detail-youtube">
+                    <div class="match-detail-youtube__status">
+                      <span
+                        id="match-detail-youtube-status"
+                        class="status-pill status-pill--idle"
+                        >未送信</span
+                      >
+                      <small id="match-detail-youtube-checked-at" class="match-detail-youtube__checked">―</small>
+                    </div>
+                    <div id="match-detail-youtube-link" class="match-detail-youtube__link">―</div>
+                    <div class="match-detail-youtube__controls">
+                      <label class="match-detail-youtube__field">
+                        <span class="sr-only">YouTube URL を入力</span>
+                        <input type="url" id="match-detail-youtube-input" placeholder="https://www.youtube.com/..." />
+                      </label>
+                      <div class="match-detail-youtube__actions">
+                        <button type="button" id="match-detail-youtube-save" class="secondary-button">
+                          URLを保存
+                        </button>
+                        <button type="button" id="match-detail-youtube-retry" class="secondary-button">
+                          再試行
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        id="match-detail-recording-path"
+                        class="match-detail-youtube__recording"
+                        placeholder="録画ファイル名 (省略可)"
+                      />
+                    </div>
+                  </div>
+                </dd>
               </div>
               <div>
                 <dt>お気に入り</dt>

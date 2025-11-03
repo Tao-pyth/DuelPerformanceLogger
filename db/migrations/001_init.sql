@@ -42,7 +42,10 @@ CREATE TABLE IF NOT EXISTS matches (
     keywords TEXT,
     memo TEXT NOT NULL DEFAULT '',
     result INTEGER NOT NULL CHECK (result IN (-1, 0, 1)),
+    youtube_flag INTEGER NOT NULL DEFAULT 0,
     youtube_url TEXT DEFAULT '',
+    youtube_video_id TEXT,
+    youtube_checked_at INTEGER,
     favorite INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     FOREIGN KEY(deck_id)
