@@ -975,3 +975,29 @@ legend {
     width: 100%;
   }
 }
+
+.recording-settings-form {
+  gap: 12px;
+}
+
+.recording-settings-form .form-actions {
+  grid-column: 1 / -1;
+}
+
+.recording-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.recording-controls__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recording-info {
+  margin-top: 12px;
+}

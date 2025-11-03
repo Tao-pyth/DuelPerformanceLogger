@@ -206,6 +206,12 @@ def log_dir() -> Path:
     return _ensure_subdir("logs")
 
 
+<<<<<<< HEAD
+def recording_log_root() -> Path:
+    """録画ログを格納するルートディレクトリを返します。"""
+
+    path = log_dir() / "recording"
+=======
 def youtube_log_dir() -> Path:
     """YouTube 連携専用のログディレクトリを返します。
 
@@ -219,10 +225,15 @@ def youtube_log_dir() -> Path:
     """
 
     path = log_dir() / "youtube"
+>>>>>>> origin/main
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
+<<<<<<< HEAD
+def recording_output_dir() -> Path:
+    """録画ファイルの既定保存先ディレクトリを返します。"""
+=======
 def recording_dir() -> Path:
     """録画ファイルを保存するディレクトリを返します。
 
@@ -234,6 +245,7 @@ def recording_dir() -> Path:
     処理概要
         1. :func:`_ensure_subdir` を利用して ``recordings`` ディレクトリを生成します。
     """
+>>>>>>> origin/main
 
     return _ensure_subdir("recordings")
 
@@ -282,6 +294,12 @@ def config_path(filename: str = "config.conf") -> Path:
     """
 
     return config_dir() / filename
+
+
+def app_settings_path() -> Path:
+    """ユーザー設定 JSON ファイルのパスを返します。"""
+
+    return config_dir() / "app_settings.json"
 
 
 def default_config_path() -> Path:
@@ -334,10 +352,16 @@ __all__ = [
     "backup_dir",
     "config_dir",
     "config_path",
+    "app_settings_path",
     "database_dir",
     "default_config_path",
     "log_dir",
+<<<<<<< HEAD
+    "recording_log_root",
+    "recording_output_dir",
+=======
     "youtube_log_dir",
+>>>>>>> origin/main
     "package_root",
     "project_root",
     "recording_dir",

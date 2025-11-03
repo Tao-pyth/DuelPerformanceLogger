@@ -36,8 +36,11 @@ def ensure_migrated(manager: "DatabaseManager") -> Version:
         manager.migrate_semver_chain の実行中に発生した例外をそのまま送出します。
     """
 
-    target = versioning.get_target_version()
-    current = versioning.coerce_version(manager.get_schema_version(), fallback=target)
+    raw_current = manager.get_schema_version()
+    current = versioning.coerce_version(
+        raw_current, fallback=versioning.TARGET_SCHEMA_VERSION
+    )
+    target = versioning.get_target_version(current)
 
     logger.info("[DB] current=%s target=%s (current>target? %s)", current, target, current > target)
 

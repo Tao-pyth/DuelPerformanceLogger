@@ -76,3 +76,20 @@ def test_get_target_version_falls_back_when_missing_semver(
     finally:
         monkeypatch.delenv("DPL_MIGRATIONS_ROOT", raising=False)
         importlib.reload(versioning)
+
+
+def test_get_target_version_uses_current_fallback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "legacy.sql").write_text("", encoding="utf-8")
+
+    monkeypatch.setenv("DPL_MIGRATIONS_ROOT", str(migrations))
+    try:
+        importlib.reload(versioning)
+        fallback = Version("9.9.9")
+        assert versioning.get_target_version(fallback) == fallback
+    finally:
+        monkeypatch.delenv("DPL_MIGRATIONS_ROOT", raising=False)
+        importlib.reload(versioning)

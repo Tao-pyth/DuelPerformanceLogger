@@ -21,6 +21,7 @@ UI 層では辞書（dict）ベースのデータ構造だけを扱えるよう�
 from __future__ import annotations
 
 import csv
+import importlib.util
 import io
 import json
 import re
@@ -105,6 +106,46 @@ def migrate_031_to_032(db: "DatabaseManager") -> None:
         db._ensure_default_keywords(connection)
 
 
+<<<<<<< HEAD
+def _run_resource_check_migration(script_name: str, db: "DatabaseManager") -> None:
+    """`resource/db/migrations` 配下の Python マイグレーションを読み込んで実行します。"""
+
+    script_path = paths.resource_path("db", "migrations", script_name)
+    if not script_path.exists():
+        raise RuntimeError(f"Migration script not found: {script_path}")
+
+    spec = importlib.util.spec_from_file_location(
+        f"dpl_migration_{script_path.stem}", script_path
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to load migration module: {script_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise RuntimeError(f"Failed to execute migration module: {script_path}") from exc
+
+    candidate = getattr(module, "run", None) or getattr(module, "apply", None)
+    if not callable(candidate):
+        raise RuntimeError(
+            f"Migration module {script_path.name} lacks callable 'run' or 'apply'"
+        )
+
+    candidate(db)
+
+
+def migrate_032_to_033(db: "DatabaseManager") -> None:
+    """v0.3.3 への移行で整合性チェックのみを実行します。"""
+
+    _run_resource_check_migration("V0.3.3__checks_only.py", db)
+
+
+def migrate_033_to_040(db: "DatabaseManager") -> None:
+    """v0.4.0 への移行で整合性チェックのみを実行します。"""
+
+    _run_resource_check_migration("V0.4.0__checks_only.py", db)
+=======
 def migrate_032_to_041(db: "DatabaseManager") -> None:
     """Add YouTube integration columns introduced in v0.4.1."""
 
@@ -114,6 +155,7 @@ def migrate_032_to_041(db: "DatabaseManager") -> None:
                 connection.execute(
                     "UPDATE matches SET youtube_flag = COALESCE(youtube_flag, 0)"
                 )
+>>>>>>> origin/main
 
 
 def migrate_legacy_to_020(db: "DatabaseManager") -> None:
@@ -126,7 +168,12 @@ MIGRATION_CHAIN: list[MigrationStep] = [
     (Version("0.2.1"), Version("0.3.0"), migrate_021_to_030),
     (Version("0.3.0"), Version("0.3.1"), migrate_030_to_031),
     (Version("0.3.1"), Version("0.3.2"), migrate_031_to_032),
+<<<<<<< HEAD
+    (Version("0.3.2"), Version("0.3.3"), migrate_032_to_033),
+    (Version("0.3.3"), Version("0.4.0"), migrate_033_to_040),
+=======
     (Version("0.3.2"), Version("0.4.1"), migrate_032_to_041),
+>>>>>>> origin/main
 ]
 
 
@@ -149,9 +196,9 @@ class DatabaseManager:
         ディレクトリを渡した場合は、その直下に既定名で作成します。
     """
 
-    SCHEMA_VERSION = versioning.TARGET_SCHEMA_USER_VERSION
+    SCHEMA_VERSION = versioning.to_user_version(versioning.get_target_version())
     SCHEMA_SEMVER_MAP = versioning.SCHEMA_VERSION_STR_MAP
-    CURRENT_SCHEMA_VERSION = versioning.TARGET_SCHEMA_VERSION_STR
+    CURRENT_SCHEMA_VERSION = str(versioning.get_target_version())
     METADATA_DEFAULTS = {
         "schema_version": CURRENT_SCHEMA_VERSION,
         "ui_mode": "normal",
@@ -529,7 +576,9 @@ class DatabaseManager:
         """定義済みのセマンティックバージョン遷移チェーンを順番に実行します。"""
 
         current = versioning.coerce_version(current_ver, fallback=Version("0.0.0"))
-        target = versioning.coerce_version(target_ver, fallback=versioning.TARGET_SCHEMA_VERSION)
+        target = versioning.coerce_version(
+            target_ver, fallback=versioning.get_target_version()
+        )
 
         while current < target:
             step_to_apply: MigrationStep | None = None
@@ -558,7 +607,7 @@ class DatabaseManager:
         """スキーマバージョン表記を正規化します。"""
 
         if fallback is None:
-            fallback_version = versioning.TARGET_SCHEMA_VERSION
+            fallback_version = versioning.get_target_version()
         else:
             fallback_version = versioning.coerce_version(fallback)
         return versioning.normalize_version_string(value, fallback=fallback_version)
@@ -570,14 +619,14 @@ class DatabaseManager:
             with self._connect() as connection:
                 version = versioning.get_db_version(connection)
         except sqlite3.DatabaseError:
-            version = versioning.TARGET_SCHEMA_VERSION
+            version = versioning.get_target_version()
         return str(version)
 
     def set_schema_version(self, version: str | int | Version) -> None:
         """スキーマバージョンを更新する。"""
 
         normalized_version = versioning.coerce_version(
-            version, fallback=versioning.TARGET_SCHEMA_VERSION
+            version, fallback=versioning.get_target_version()
         )
         target_version = versioning.to_user_version(normalized_version)
         normalized = str(normalized_version)
@@ -784,6 +833,33 @@ class DatabaseManager:
                     )
                     schema_changed = True
 
+            if not self._table_exists(connection, "recordings"):
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS recordings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        match_id INTEGER NOT NULL,
+                        file_path TEXT NOT NULL,
+                        profile TEXT NOT NULL,
+                        fps INTEGER NOT NULL,
+                        bitrate TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'completed',
+                        duration REAL,
+                        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                        FOREIGN KEY(match_id) REFERENCES matches(id)
+                            ON DELETE CASCADE
+                            ON UPDATE CASCADE
+                    )
+                    """
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_recordings_match_id ON recordings(match_id)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_recordings_created_at ON recordings(created_at)"
+                )
+                schema_changed = True
+
             self._ensure_default_keywords(connection)
 
         if schema_changed:
@@ -792,7 +868,7 @@ class DatabaseManager:
             self.recalculate_keyword_usage()
 
         current_version = versioning.coerce_version(self.get_schema_version())
-        target_version = versioning.TARGET_SCHEMA_VERSION
+        target_version = versioning.get_target_version(current_version)
         reached = self.migrate_semver_chain(current_version, target_version)
         self.set_schema_version(reached)
 
@@ -1084,6 +1160,24 @@ class DatabaseManager:
             # 別要因は投げ直し
             raise
 
+    def fetch_recordings(self, match_id: Optional[int] = None) -> list[dict[str, object]]:
+        """録画レコード一覧を取得し、任意で ``match_id`` で絞り込む。"""
+
+        query = (
+            "SELECT id, match_id, file_path, profile, fps, bitrate, status, duration, created_at "
+            "FROM recordings"
+        )
+        params: tuple[object, ...] = ()
+        if match_id is not None:
+            query += " WHERE match_id = ?"
+            params = (match_id,)
+        query += " ORDER BY created_at DESC, id DESC"
+
+        with self._connect() as connection:
+            cursor = connection.execute(query, params)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
     def fetch_last_match(self, deck_name: Optional[str] = None) -> Optional[dict[str, object]]:
         """最新の対戦ログを 1 件返却（デッキ名で絞り込み可能）。"""
         query = (
@@ -1374,6 +1468,41 @@ class DatabaseManager:
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             log_error("Failed to record match", exc, record=record)
             raise DatabaseError("Failed to record match") from exc
+
+    def record_recording(
+        self,
+        match_id: int,
+        file_path: Path | str,
+        *,
+        profile: str,
+        fps: int,
+        bitrate: str,
+        status: str = "completed",
+        duration: float | None = None,
+    ) -> int:
+        """録画ファイルを recordings テーブルへ登録する。"""
+
+        path_text = str(Path(file_path))
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO recordings (
+                        match_id, file_path, profile, fps, bitrate, status, duration
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (match_id, path_text, profile, fps, bitrate, status, duration),
+                )
+                return int(cursor.lastrowid)
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error(
+                "Failed to record FFmpeg output",
+                exc,
+                match_id=match_id,
+                file_path=path_text,
+            )
+            raise DatabaseError("Failed to register recording") from exc
 
     def fetch_opponent_decks(self) -> list[dict[str, object]]:
         """登録済みの対戦相手デッキ一覧を名称順で返却。"""

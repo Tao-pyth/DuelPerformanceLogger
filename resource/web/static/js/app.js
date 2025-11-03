@@ -30,6 +30,23 @@ const settingsBackupExportButton = document.getElementById("settings-backup-expo
 const settingsBackupImportInput = document.getElementById("settings-backup-import");
 const settingsImportStatusEl = document.getElementById("settings-import-status");
 const settingsResetButton = document.getElementById("settings-reset-db");
+const recordingStatusLabel = document.getElementById("recording-status-label");
+const recordingSettingsForm = document.getElementById("recording-settings-form");
+const recordingSaveDirectoryInput = document.getElementById("recording-save-directory");
+const recordingBitrateInput = document.getElementById("recording-bitrate");
+const recordingAudioBitrateInput = document.getElementById("recording-audio-bitrate");
+const recordingFpsInput = document.getElementById("recording-fps");
+const recordingProfileSelect = document.getElementById("recording-profile");
+const recordingFfmpegPathInput = document.getElementById("recording-ffmpeg-path");
+const recordingAutoDownloadInput = document.getElementById("recording-auto-download");
+const recordingAudioDeviceInput = document.getElementById("recording-audio-device");
+const recordingVideoSourceInput = document.getElementById("recording-video-source");
+const recordingMatchIdInput = document.getElementById("recording-match-id");
+const recordingStartButton = document.getElementById("recording-start");
+const recordingStopButton = document.getElementById("recording-stop");
+const recordingScreenshotButton = document.getElementById("recording-screenshot");
+const recordingLastOutputEl = document.getElementById("recording-last-output");
+const recordingLastScreenshotEl = document.getElementById("recording-last-screenshot");
 const keywordForm = document.getElementById("keyword-form");
 const keywordNameInput = document.getElementById("keyword-name");
 const keywordDescriptionInput = document.getElementById("keyword-description");
@@ -122,6 +139,7 @@ const keywordToggleState = {
 
 let deckAnalysisData = [];
 let opponentAnalysisData = [];
+let recordingState = null;
 
 const SEASON_FILTER_ALL = "__ALL__";
 const SEASON_FILTER_RANK = "__RANK__";
@@ -1684,6 +1702,76 @@ function updateMatchEntryView() {
   refreshKeywordToggleList("entry", latestSnapshot?.keywords ?? [], { selected: [] });
 }
 
+function applyRecordingSnapshot(recording) {
+  recordingState = recording || null;
+
+  if (!recording) {
+    if (recordingStatusLabel) {
+      recordingStatusLabel.textContent = "状態：未取得";
+    }
+    return;
+  }
+
+  const settings = recording.settings ?? {};
+
+  if (recordingSaveDirectoryInput) {
+    recordingSaveDirectoryInput.value = settings.save_directory ?? "";
+  }
+  if (recordingBitrateInput) {
+    recordingBitrateInput.value = settings.bitrate ?? "";
+  }
+  if (recordingAudioBitrateInput) {
+    recordingAudioBitrateInput.value = settings.audio_bitrate ?? "";
+  }
+  if (recordingFpsInput) {
+    recordingFpsInput.value = settings.fps ?? "";
+  }
+  if (recordingProfileSelect && settings.profile) {
+    recordingProfileSelect.value = settings.profile;
+  }
+  if (recordingFfmpegPathInput) {
+    recordingFfmpegPathInput.value = settings.ffmpeg_path ?? "";
+  }
+  if (recordingAutoDownloadInput) {
+    recordingAutoDownloadInput.checked = Boolean(settings.auto_download_ffmpeg);
+  }
+  if (recordingAudioDeviceInput) {
+    recordingAudioDeviceInput.value = settings.audio_device ?? "";
+  }
+  if (recordingVideoSourceInput) {
+    recordingVideoSourceInput.value = settings.video_source ?? "";
+  }
+
+  if (recordingStatusLabel) {
+    const statusText = recording.is_recording ? "録画中" : "待機";
+    const profileLabel = recording.active_profile || settings.profile || "";
+    recordingStatusLabel.textContent = profileLabel
+      ? `状態：${statusText}（${profileLabel}）`
+      : `状態：${statusText}`;
+  }
+
+  if (recordingStartButton) {
+    recordingStartButton.disabled = Boolean(recording.is_recording);
+  }
+  if (recordingStopButton) {
+    recordingStopButton.disabled = !recording.is_recording;
+  }
+
+  if (recordingLastOutputEl) {
+    const lastRecording = recording.last_recording;
+    if (lastRecording && lastRecording.path) {
+      const status = lastRecording.status ? `（${lastRecording.status}）` : "";
+      recordingLastOutputEl.textContent = `${lastRecording.path}${status}`;
+    } else {
+      recordingLastOutputEl.textContent = "―";
+    }
+  }
+
+  if (recordingLastScreenshotEl) {
+    recordingLastScreenshotEl.textContent = recording.last_screenshot || "―";
+  }
+}
+
 function applySnapshot(snapshot) {
   latestSnapshot = snapshot;
   versionEl.textContent = snapshot.version ?? "DPL";
@@ -1774,6 +1862,8 @@ function applySnapshot(snapshot) {
   if (currentMatchDetail?.id && currentView === "match-detail") {
     showMatchDetail(currentMatchDetail.id, { pushHistory: false, navigate: false });
   }
+
+  applyRecordingSnapshot(snapshot.recording);
 
   settingsMigrationEl.textContent = migrationEl.textContent;
   if (settingsMigrationTimestampEl) {
@@ -2304,6 +2394,60 @@ if (matchDetailEditButton) {
   });
 }
 
+<<<<<<< HEAD
+if (recordingSettingsForm) {
+  recordingSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const payload = {
+      save_directory: recordingSaveDirectoryInput?.value?.trim() ?? "",
+      bitrate: recordingBitrateInput?.value?.trim() ?? "",
+      audio_bitrate: recordingAudioBitrateInput?.value?.trim() ?? "",
+      profile: recordingProfileSelect?.value ?? "",
+      ffmpeg_path: recordingFfmpegPathInput?.value?.trim() ?? "",
+      auto_download_ffmpeg: recordingAutoDownloadInput?.checked ?? false,
+      audio_device: recordingAudioDeviceInput?.value?.trim() ?? "",
+      video_source: recordingVideoSourceInput?.value?.trim() ?? "",
+    };
+
+    const fpsValue = recordingFpsInput?.value?.trim() ?? "";
+    if (fpsValue !== "") {
+      const fpsNumber = Number.parseInt(fpsValue, 10);
+      if (!Number.isInteger(fpsNumber) || fpsNumber <= 0) {
+        showNotification("FPS には 1 以上の数値を入力してください", 4200);
+        return;
+      }
+      payload.fps = fpsNumber;
+    }
+
+    if (!hasEel) {
+      applyRecordingSnapshot({
+        settings: payload,
+        is_recording: recordingState?.is_recording ?? false,
+        active_profile: payload.profile || recordingState?.active_profile || "",
+        last_recording: recordingState?.last_recording ?? null,
+        last_screenshot: recordingState?.last_screenshot ?? null,
+      });
+      showNotification("録画設定を保存しました (オフライン)");
+      return;
+    }
+
+    try {
+      const response = await callPy("update_recording_settings", payload);
+      if (!response || response.ok !== true) {
+        const message = response?.error || "録画設定の保存に失敗しました";
+        showNotification(message, 4200);
+        return;
+      }
+      if (response.recording) {
+        applyRecordingSnapshot(response.recording);
+      }
+      showNotification("録画設定を保存しました");
+    } catch (error) {
+      handleError(error, "録画設定の保存に失敗しました", {
+        context: "update_recording_settings",
+      });
+=======
 if (matchDetailYoutubeSaveButton) {
   matchDetailYoutubeSaveButton.addEventListener("click", async () => {
     if (!currentMatchDetail) {
@@ -2333,10 +2477,107 @@ if (matchDetailYoutubeSaveButton) {
     } finally {
       matchDetailYoutubeSaveButton.disabled = false;
       matchDetailYoutubeSaveButton.textContent = originalLabel;
+>>>>>>> origin/main
     }
   });
 }
 
+<<<<<<< HEAD
+function buildRecordingPayload() {
+  const payload = {};
+  const matchIdValue = recordingMatchIdInput?.value?.trim();
+  if (matchIdValue) {
+    const matchId = Number.parseInt(matchIdValue, 10);
+    if (!Number.isNaN(matchId) && matchId > 0) {
+      payload.match_id = matchId;
+    }
+  }
+  if (recordingProfileSelect?.value) {
+    payload.profile = recordingProfileSelect.value;
+  }
+  return payload;
+}
+
+if (recordingStartButton) {
+  recordingStartButton.addEventListener("click", async () => {
+    if (!hasEel) {
+      showNotification("録画機能は現在利用できません", 4200);
+      return;
+    }
+
+    try {
+      const response = await callPy("start_recording", buildRecordingPayload());
+      if (!response || response.ok !== true) {
+        const message = response?.error || "録画の開始に失敗しました";
+        showNotification(message, 4200);
+        return;
+      }
+      if (response.recording) {
+        applyRecordingSnapshot(response.recording);
+      }
+      if (response.path && recordingLastOutputEl) {
+        recordingLastOutputEl.textContent = response.path;
+      }
+    } catch (error) {
+      handleError(error, "録画の開始に失敗しました", { context: "start_recording" });
+    }
+  });
+}
+
+if (recordingStopButton) {
+  recordingStopButton.addEventListener("click", async () => {
+    if (!hasEel) {
+      showNotification("録画機能は現在利用できません", 4200);
+      return;
+    }
+
+    try {
+      const response = await callPy("stop_recording", buildRecordingPayload());
+      if (!response || response.ok !== true) {
+        const message = response?.error || "録画の停止に失敗しました";
+        showNotification(message, 4200);
+        return;
+      }
+      if (response.recording) {
+        applyRecordingSnapshot(response.recording);
+      }
+      if (response.result?.path && recordingLastOutputEl) {
+        const status = response.result.status
+          ? `（${response.result.status}）`
+          : "";
+        recordingLastOutputEl.textContent = `${response.result.path}${status}`;
+      }
+    } catch (error) {
+      handleError(error, "録画の停止に失敗しました", { context: "stop_recording" });
+    }
+  });
+}
+
+if (recordingScreenshotButton) {
+  recordingScreenshotButton.addEventListener("click", async () => {
+    if (!hasEel) {
+      showNotification("録画機能は現在利用できません", 4200);
+      return;
+    }
+
+    try {
+      const response = await callPy("take_screenshot", buildRecordingPayload());
+      if (!response || response.ok !== true) {
+        const message = response?.error || "スクリーンショットの取得に失敗しました";
+        showNotification(message, 4200);
+        return;
+      }
+      if (response.recording) {
+        applyRecordingSnapshot(response.recording);
+      }
+      if (response.path && recordingLastScreenshotEl) {
+        recordingLastScreenshotEl.textContent = response.path;
+      }
+    } catch (error) {
+      handleError(error, "スクリーンショットの取得に失敗しました", {
+        context: "take_screenshot",
+      });
+=======
 if (matchDetailYoutubeRetryButton) {
   matchDetailYoutubeRetryButton.addEventListener("click", async () => {
     if (!currentMatchDetail) {
@@ -2369,6 +2610,7 @@ if (matchDetailYoutubeRetryButton) {
     } finally {
       matchDetailYoutubeRetryButton.disabled = false;
       matchDetailYoutubeRetryButton.textContent = originalLabel;
+>>>>>>> origin/main
     }
   });
 }
