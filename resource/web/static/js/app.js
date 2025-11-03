@@ -2394,7 +2394,6 @@ if (matchDetailEditButton) {
   });
 }
 
-<<<<<<< HEAD
 if (recordingSettingsForm) {
   recordingSettingsForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -2447,7 +2446,10 @@ if (recordingSettingsForm) {
       handleError(error, "録画設定の保存に失敗しました", {
         context: "update_recording_settings",
       });
-=======
+    }
+  });
+}
+
 if (matchDetailYoutubeSaveButton) {
   matchDetailYoutubeSaveButton.addEventListener("click", async () => {
     if (!currentMatchDetail) {
@@ -2477,12 +2479,10 @@ if (matchDetailYoutubeSaveButton) {
     } finally {
       matchDetailYoutubeSaveButton.disabled = false;
       matchDetailYoutubeSaveButton.textContent = originalLabel;
->>>>>>> origin/main
     }
   });
 }
 
-<<<<<<< HEAD
 function buildRecordingPayload() {
   const payload = {};
   const matchIdValue = recordingMatchIdInput?.value?.trim();
@@ -2577,7 +2577,10 @@ if (recordingScreenshotButton) {
       handleError(error, "スクリーンショットの取得に失敗しました", {
         context: "take_screenshot",
       });
-=======
+    }
+  });
+}
+
 if (matchDetailYoutubeRetryButton) {
   matchDetailYoutubeRetryButton.addEventListener("click", async () => {
     if (!currentMatchDetail) {
@@ -2610,7 +2613,6 @@ if (matchDetailYoutubeRetryButton) {
     } finally {
       matchDetailYoutubeRetryButton.disabled = false;
       matchDetailYoutubeRetryButton.textContent = originalLabel;
->>>>>>> origin/main
     }
   });
 }

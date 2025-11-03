@@ -2,20 +2,6 @@
 
 All notable changes to this project are documented here. Version numbers follow `DPL.<MAJOR>.<MINOR>.<PATCH>`.
 
-<<<<<<< HEAD
-## [0.4.0] - 2025-10-27
-### Added
-- EN: FFmpeg recording core capable of handling consent-based auto-download, start/stop controls, and screenshots from the desktop capture pipeline.
-- JP: 同意後の自動ダウンロードに対応した FFmpeg 録画コアを追加し、デスクトップキャプチャからの開始・停止およびスクリーンショット取得を実装しました。
-- EN: Recording profiles for 16:9, 21:9, and 32:9 aspect ratios with integrity checks and a single retry to guard against corruption.
-- JP: 16:9・21:9・32:9 の録画プロファイルを追加し、破損検知と 1 回の再試行による保護を組み込みました。
-
-### Changed
-- EN: The recording settings UI now persists save directory, bitrate, and FPS values to `app_settings.json`, keeping the desktop client and backend in sync.
-- JP: 録画設定 UI が保存先ディレクトリ・ビットレート・FPS を `app_settings.json` に保存し、フロントエンドとバックエンドの設定を同期するようになりました。
-- EN: FFmpeg session logs are rotated per session under `/log/recording/`, and migration logs surface the single-line `[DB] current=... target=...` status during startup.
-- JP: FFmpeg セッションログを `/log/recording/` 配下でセッション単位に出力し、起動ログに `[DB] current=... target=...` の単一行を表示するよう変更しました。
-=======
 ## [0.4.1] - 2025-10-19
 ### Added
 - EN: Introduced optional YouTube uploads with API retries, manual URL overrides, and dedicated log files per session.
@@ -32,7 +18,6 @@ All notable changes to this project are documented here. Version numbers follow 
 ### Fixed
 - EN: Hardened YouTube upload logging so API errors generate per-status files without crashing the application.
 - JP: YouTube アップロードのエラーログ出力を強化し、API 失敗時でもアプリが落ちないよう改善しました。
->>>>>>> origin/main
 
 ## [0.3.3] - 2025-10-18
 ### Added
