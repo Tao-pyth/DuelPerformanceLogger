@@ -16,6 +16,7 @@
     "B11_Security_Standards.md",
     "B12_Test_Plan.md",
     "B13_Update_Deployment.md",
+    "B14_Regression_Test_Checklist.md",
     "CHANGELOG.md"
   ],
   "C": [
