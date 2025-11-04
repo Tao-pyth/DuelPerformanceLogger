@@ -533,6 +533,10 @@ class DatabaseManager:
             target_ver, fallback=versioning.get_target_version()
         )
 
+        lowest_start = MIGRATION_CHAIN[0][0]
+        if current < lowest_start:
+            current = lowest_start
+
         while current < target:
             step_to_apply: MigrationStep | None = None
             for start_version, end_version, func in MIGRATION_CHAIN:
