@@ -8,7 +8,8 @@
     "A05_Error_Taxonomy.md",
     "A06_Logging_Strategy.md",
     "A07_CI_Automation.md",
-    "A08_Project_Structure.md"
+    "A08_Project_Structure.md",
+    "A09_Naming_Conventions.md"
   ],
   "B": [
     "B10_Release_Management.md",
