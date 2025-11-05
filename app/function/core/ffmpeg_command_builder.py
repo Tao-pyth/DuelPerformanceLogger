@@ -10,6 +10,9 @@ __all__ = [
     "RecordingProfile",
     "PROFILE_PRESETS",
     "resolve_profile",
+    "QualityPreset",
+    "QUALITY_PRESETS",
+    "resolve_quality_preset",
     "build_record_command",
     "build_screenshot_command",
 ]
@@ -40,6 +43,29 @@ def resolve_profile(name: str | None) -> RecordingProfile:
     return PROFILE_PRESETS.get(key, PROFILE_PRESETS["16:9"])
 
 
+@dataclass(frozen=True)
+class QualityPreset:
+    """Definition of quality presets controlling FPS and bitrates."""
+
+    name: str
+    label: str
+    fps: int
+    video_bitrate: str
+    audio_bitrate: str
+
+
+QUALITY_PRESETS: Mapping[str, QualityPreset] = {
+    "standard": QualityPreset("standard", "標準", 60, "6000k", "160k"),
+    "high": QualityPreset("high", "高画質", 60, "12000k", "192k"),
+    "light": QualityPreset("light", "軽量", 30, "4000k", "128k"),
+}
+
+
+def resolve_quality_preset(name: str | None) -> QualityPreset:
+    key = (name or "standard").strip().lower()
+    return QUALITY_PRESETS.get(key, QUALITY_PRESETS["standard"])
+
+
 def _base_command(executable: str | Path) -> list[str]:
     return [str(executable), "-y"]
 
@@ -48,9 +74,7 @@ def build_record_command(
     executable: str | Path,
     output_path: Path,
     *,
-    fps: int,
-    video_bitrate: str,
-    audio_bitrate: str,
+    quality: QualityPreset,
     profile: RecordingProfile,
     video_source: str = "desktop",
     audio_device: str | None = None,
@@ -63,7 +87,7 @@ def build_record_command(
         "-f",
         "gdigrab",
         "-framerate",
-        str(fps),
+        str(quality.fps),
         "-video_size",
         profile.video_size,
         "-i",
@@ -75,12 +99,12 @@ def build_record_command(
         "-c:v",
         "libx264",
         "-b:v",
-        video_bitrate,
+        quality.video_bitrate,
         "-pix_fmt",
         "yuv420p",
     ])
     if audio_device:
-        command.extend(["-c:a", "aac", "-b:a", audio_bitrate])
+        command.extend(["-c:a", "aac", "-b:a", quality.audio_bitrate])
     command.append(str(output_path))
     if extra_args:
         command.extend(list(extra_args))
