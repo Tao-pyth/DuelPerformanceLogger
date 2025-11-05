@@ -32,6 +32,9 @@ const settingsImportStatusEl = document.getElementById("settings-import-status")
 const settingsResetButton = document.getElementById("settings-reset-db");
 const recordingStatusLabel = document.getElementById("recording-status-label");
 const recordingSettingsForm = document.getElementById("recording-settings-form");
+const recordingUseFfmpegInput = document.getElementById("recording-use-ffmpeg");
+const recordingSettingsFieldset = document.querySelector("[data-ffmpeg-scope]");
+const recordingControlsContainer = document.querySelector("[data-ffmpeg-controls]");
 const recordingSaveDirectoryInput = document.getElementById("recording-save-directory");
 const recordingBitrateInput = document.getElementById("recording-bitrate");
 const recordingAudioBitrateInput = document.getElementById("recording-audio-bitrate");
@@ -149,6 +152,7 @@ const keywordToggleState = {
 let deckAnalysisData = [];
 let opponentAnalysisData = [];
 let recordingState = null;
+let isTogglingFfmpeg = false;
 
 const RECORDING_QUALITY_PRESETS = {
   standard: { label: "標準", fps: 60, videoBitrate: "6000k", audioBitrate: "160k" },
@@ -1776,6 +1780,44 @@ function getSelectedRecordingQualityPreset() {
   return recordingQualityPresetValue || "standard";
 }
 
+function updateFfmpegUsageUI({ enabled, available, isRecording }) {
+  const safeEnabled = Boolean(enabled);
+  const safeAvailable = Boolean(available);
+  const safeRecording = Boolean(isRecording);
+
+  if (recordingSettingsFieldset) {
+    recordingSettingsFieldset.disabled = !safeEnabled;
+  }
+  if (recordingMatchIdInput) {
+    recordingMatchIdInput.disabled = !safeEnabled;
+  }
+  if (recordingStartButton) {
+    recordingStartButton.disabled = !safeEnabled || !safeAvailable || safeRecording;
+  }
+  if (recordingStopButton) {
+    recordingStopButton.disabled = !safeEnabled || !safeRecording;
+  }
+  if (recordingScreenshotButton) {
+    recordingScreenshotButton.disabled = !safeEnabled || !safeAvailable;
+  }
+  if (recordingControlsContainer) {
+    recordingControlsContainer.classList.toggle(
+      "recording-controls--disabled",
+      !safeEnabled,
+    );
+  }
+}
+
+function applyFfmpegUsageFromState(state) {
+  const enabled = Boolean(state?.settings?.ffmpeg_enabled);
+  const available = Boolean(state?.ffmpeg?.exists);
+  const isRecording = Boolean(state?.is_recording);
+  updateFfmpegUsageUI({ enabled, available, isRecording });
+  if (recordingUseFfmpegInput) {
+    recordingUseFfmpegInput.checked = enabled;
+  }
+}
+
 function applyRecordingSnapshot(recording) {
   recordingState = recording || null;
 
@@ -1783,10 +1825,17 @@ function applyRecordingSnapshot(recording) {
     if (recordingStatusLabel) {
       recordingStatusLabel.textContent = "状態：未取得";
     }
+    if (recordingUseFfmpegInput) {
+      recordingUseFfmpegInput.checked = false;
+    }
+    updateFfmpegUsageUI({ enabled: false, available: false, isRecording: false });
     return;
   }
 
   const settings = recording.settings ?? {};
+  if (!recording.ffmpeg) {
+    recording.ffmpeg = {};
+  }
 
   updateRecordingQualityUI(settings.quality_preset, settings);
 
@@ -1809,6 +1858,8 @@ function applyRecordingSnapshot(recording) {
     recordingVideoSourceInput.value = settings.video_source ?? "";
   }
 
+  applyFfmpegUsageFromState(recording);
+
   if (recordingStatusLabel) {
     const statusText = recording.is_recording ? "録画中" : "待機";
     const profileLabel = recording.active_profile || settings.profile || "";
@@ -1823,15 +1874,13 @@ function applyRecordingSnapshot(recording) {
     if (qualityLabel) {
       labels.push(qualityLabel);
     }
+    if (!settings.ffmpeg_enabled) {
+      labels.push("FFmpeg 無効");
+    } else if (!Boolean(recording.ffmpeg?.exists)) {
+      labels.push("FFmpeg 未配置");
+    }
     const suffix = labels.length ? `（${labels.join(" / ")}）` : "";
     recordingStatusLabel.textContent = `状態：${statusText}${suffix}`;
-  }
-
-  if (recordingStartButton) {
-    recordingStartButton.disabled = Boolean(recording.is_recording);
-  }
-  if (recordingStopButton) {
-    recordingStopButton.disabled = !recording.is_recording;
   }
 
   if (recordingLastOutputEl) {
@@ -1846,6 +1895,80 @@ function applyRecordingSnapshot(recording) {
 
   if (recordingLastScreenshotEl) {
     recordingLastScreenshotEl.textContent = recording.last_screenshot || "―";
+  }
+}
+
+async function enableFfmpegWorkflow() {
+  const info = recordingState?.ffmpeg ?? {};
+  let download = false;
+
+  if (!info.exists) {
+    if (info.managed) {
+      const location = info.path ? `\n${info.path}\n` : " 既定の保存先 ";
+      const confirmed = window.confirm(
+        `FFmpeg を${location}にダウンロードして展開します。続行しますか？`,
+      );
+      if (!confirmed) {
+        return false;
+      }
+      download = true;
+    } else {
+      const locationText = info.path ? `（${info.path}）` : "";
+      showNotification(
+        `指定された FFmpeg${locationText} が見つかりません。保存先を確認してください。`,
+        4800,
+      );
+      return false;
+    }
+  }
+
+  try {
+    const response = await callPy("enable_ffmpeg", { download });
+    if (!response || response.ok !== true) {
+      const message = response?.error || "FFmpeg の有効化に失敗しました";
+      showNotification(message, 4200);
+      return false;
+    }
+    if (response.recording) {
+      applyRecordingSnapshot(response.recording);
+    }
+    showNotification("FFmpeg を有効化しました", 3600);
+    return true;
+  } catch (error) {
+    handleError(error, "FFmpeg の有効化に失敗しました", { context: "enable_ffmpeg" });
+    return false;
+  }
+}
+
+async function disableFfmpegWorkflow() {
+  if (recordingState?.is_recording) {
+    showNotification("録画中は FFmpeg を無効化できません", 4200);
+    return false;
+  }
+
+  const info = recordingState?.ffmpeg ?? {};
+  let remove = false;
+  if (info.managed && info.exists) {
+    const target = info.path ? `（${info.path}）` : "";
+    const confirmed = window.confirm(`ダウンロード済みの FFmpeg${target} を削除しますか？`);
+    remove = confirmed;
+  }
+
+  try {
+    const response = await callPy("disable_ffmpeg", { remove });
+    if (!response || response.ok !== true) {
+      const message = response?.error || "FFmpeg の無効化に失敗しました";
+      showNotification(message, 4200);
+      return false;
+    }
+    if (response.recording) {
+      applyRecordingSnapshot(response.recording);
+    }
+    showNotification("FFmpeg を無効化しました", 3600);
+    return true;
+  } catch (error) {
+    handleError(error, "FFmpeg の無効化に失敗しました", { context: "disable_ffmpeg" });
+    return false;
   }
 }
 
@@ -2481,6 +2604,50 @@ if (recordingQualityOptions.length > 0) {
   });
 }
 
+if (recordingUseFfmpegInput) {
+  recordingUseFfmpegInput.addEventListener("change", async () => {
+    if (isTogglingFfmpeg) {
+      return;
+    }
+
+    const previousEnabled = Boolean(recordingState?.settings?.ffmpeg_enabled);
+    const desired = recordingUseFfmpegInput.checked;
+
+    if (!hasEel) {
+      showNotification("録画機能は現在利用できません", 4200);
+      recordingUseFfmpegInput.checked = previousEnabled;
+      applyFfmpegUsageFromState(recordingState);
+      return;
+    }
+
+    if (desired === previousEnabled) {
+      applyFfmpegUsageFromState(recordingState);
+      return;
+    }
+
+    updateFfmpegUsageUI({
+      enabled: desired,
+      available: desired ? Boolean(recordingState?.ffmpeg?.exists) : false,
+      isRecording: Boolean(recordingState?.is_recording),
+    });
+
+    isTogglingFfmpeg = true;
+    recordingUseFfmpegInput.disabled = true;
+    try {
+      const succeeded = desired
+        ? await enableFfmpegWorkflow()
+        : await disableFfmpegWorkflow();
+      if (!succeeded) {
+        recordingUseFfmpegInput.checked = previousEnabled;
+        applyFfmpegUsageFromState(recordingState);
+      }
+    } finally {
+      recordingUseFfmpegInput.disabled = false;
+      isTogglingFfmpeg = false;
+    }
+  });
+}
+
 updateRecordingQualityUI(recordingQualityPresetValue);
 
 if (recordingSettingsForm) {
@@ -2488,6 +2655,8 @@ if (recordingSettingsForm) {
     event.preventDefault();
 
     const payload = {
+      ffmpeg_enabled:
+        recordingUseFfmpegInput?.checked ?? Boolean(recordingState?.settings?.ffmpeg_enabled),
       save_directory: recordingSaveDirectoryInput?.value?.trim() ?? "",
       quality_preset: getSelectedRecordingQualityPreset(),
       profile: recordingProfileSelect?.value ?? "",
@@ -2594,6 +2763,17 @@ if (recordingStartButton) {
       return;
     }
 
+    if (!recordingState?.settings?.ffmpeg_enabled) {
+      showNotification("FFmpeg が無効化されています", 4200);
+      applyFfmpegUsageFromState(recordingState);
+      return;
+    }
+
+    if (!recordingState?.ffmpeg?.exists) {
+      showNotification("FFmpeg が見つかりません。設定を確認してください", 4200);
+      return;
+    }
+
     try {
       const response = await callPy("start_recording", buildRecordingPayload());
       if (!response || response.ok !== true) {
@@ -2646,6 +2826,17 @@ if (recordingScreenshotButton) {
   recordingScreenshotButton.addEventListener("click", async () => {
     if (!hasEel) {
       showNotification("録画機能は現在利用できません", 4200);
+      return;
+    }
+
+    if (!recordingState?.settings?.ffmpeg_enabled) {
+      showNotification("FFmpeg が無効化されています", 4200);
+      applyFfmpegUsageFromState(recordingState);
+      return;
+    }
+
+    if (!recordingState?.ffmpeg?.exists) {
+      showNotification("FFmpeg が見つかりません。設定を確認してください", 4200);
       return;
     }
 

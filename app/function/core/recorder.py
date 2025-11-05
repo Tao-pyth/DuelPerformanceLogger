@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .config_handler import RecordingSettings
+from . import ffmpeg_manager
 from .ffmpeg_command_builder import (
     RecordingProfile,
     build_record_command,
@@ -176,23 +177,16 @@ class FFmpegRecorder:
         return ensure_extension(self.settings.save_directory / sanitized, "mp4")
 
     def _resolve_ffmpeg(self) -> Path:
-        candidate = self.settings.ffmpeg_path
-        if candidate and candidate.exists():
-            return candidate
-        if candidate:
-            target = candidate
-        else:
-            bin_dir = paths.user_data_root() / "bin"
-            bin_dir.mkdir(parents=True, exist_ok=True)
-            target = bin_dir / "ffmpeg"
-        if target.exists():
-            return target
+        status = ffmpeg_manager.inspect(self.settings)
+        if status.exists:
+            return status.path
         if not self.settings.auto_download_ffmpeg:
-            return target
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("#!/bin/sh\necho 'ffmpeg stub'\n", encoding="utf-8")
-        target.chmod(0o755)
-        return target
+            raise RecordingError(f"FFmpeg executable not found: {status.path}")
+        try:
+            ensured = ffmpeg_manager.ensure(self.settings, allow_download=True)
+        except FileNotFoundError as exc:  # pragma: no cover - defensive
+            raise RecordingError(str(exc)) from exc
+        return ensured.path
 
     def _cleanup_handles(self) -> None:
         if self._log_handle:

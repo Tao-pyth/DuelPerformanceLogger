@@ -17,6 +17,7 @@ __all__ = [
     "csv_schema_map",
     "migration_runner",
     "config_handler",
+    "ffmpeg_manager",
     "ffmpeg_command_builder",
     "file_sanitizer",
     "record_integrity",

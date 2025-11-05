@@ -23,6 +23,22 @@ __all__ = [
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _coerce_bool(value: Any, *, default: bool = False) -> bool:
+    """Normalize loose truthy values to :class:`bool`."""
+
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    return text in {"1", "true", "yes", "on"}
+
+
 DEFAULT_APP_SETTINGS: dict[str, Any] = {
     "recording": {
         "save_directory": str(paths.recording_dir()),
@@ -33,6 +49,7 @@ DEFAULT_APP_SETTINGS: dict[str, Any] = {
         "profile": "16:9",
         "ffmpeg_path": "",
         "auto_download_ffmpeg": False,
+        "ffmpeg_enabled": True,
         "audio_device": "",
         "video_source": "desktop",
     }
@@ -51,6 +68,7 @@ class RecordingSettings:
     profile: str
     ffmpeg_path: Path | None
     auto_download_ffmpeg: bool
+    ffmpeg_enabled: bool
     audio_device: str | None
     video_source: str
 
@@ -88,6 +106,14 @@ class RecordingSettings:
         preset = resolve_quality_preset(quality_name)
         ffmpeg_raw = str(mapping.get("ffmpeg_path", data["ffmpeg_path"]) or "").strip()
         ffmpeg_path = Path(ffmpeg_raw).expanduser() if ffmpeg_raw else None
+        auto_download = _coerce_bool(
+            mapping.get("auto_download_ffmpeg"),
+            default=data.get("auto_download_ffmpeg", False),
+        )
+        ffmpeg_enabled = _coerce_bool(
+            mapping.get("ffmpeg_enabled"),
+            default=data.get("ffmpeg_enabled", True),
+        )
         audio_device = mapping.get("audio_device") or None
         video_source = str(mapping.get("video_source", data["video_source"]) or "desktop")
         settings = cls(
@@ -98,9 +124,8 @@ class RecordingSettings:
             fps=preset.fps,
             profile=str(mapping.get("profile", data["profile"])),
             ffmpeg_path=ffmpeg_path,
-            auto_download_ffmpeg=bool(
-                mapping.get("auto_download_ffmpeg", data["auto_download_ffmpeg"])
-            ),
+            auto_download_ffmpeg=auto_download,
+            ffmpeg_enabled=ffmpeg_enabled,
             audio_device=audio_device,
             video_source=video_source,
         )
@@ -127,6 +152,7 @@ class RecordingSettings:
             "profile": self.profile,
             "ffmpeg_path": str(self.ffmpeg_path) if self.ffmpeg_path else "",
             "auto_download_ffmpeg": self.auto_download_ffmpeg,
+            "ffmpeg_enabled": self.ffmpeg_enabled,
             "audio_device": self.audio_device or "",
             "video_source": self.video_source,
         }
