@@ -3,10 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from app.function.core import (
     config_handler,
     ffmpeg_command_builder,
+    ffmpeg_manager,
     file_sanitizer,
+    paths,
     record_integrity,
     recorder,
     session_logging,
@@ -35,6 +39,7 @@ def test_recording_settings_round_trip(tmp_path: Path) -> None:
     assert loaded.bitrate == "4000k"
     assert loaded.profile == "21:9"
     assert loaded.save_directory.exists()
+    assert loaded.ffmpeg_enabled is True
 
     updated = config_handler.RecordingSettings.from_mapping(
         {**loaded.to_dict(), "quality_preset": "high"},
@@ -43,6 +48,7 @@ def test_recording_settings_round_trip(tmp_path: Path) -> None:
     payload = config_handler.update_recording_settings(updated)
     assert payload["recording"]["quality_preset"] == "high"
     assert payload["recording"]["bitrate"] == "12000k"
+    assert payload["recording"]["ffmpeg_enabled"] is True
 
 
 def test_command_builder_profiles() -> None:
@@ -126,6 +132,7 @@ def test_ffmpeg_recorder_start_stop_registers(tmp_path: Path) -> None:
         profile="16:9",
         ffmpeg_path=ffmpeg_path,
         auto_download_ffmpeg=False,
+        ffmpeg_enabled=True,
         audio_device=None,
         video_source="desktop",
     )
@@ -163,3 +170,40 @@ def test_ffmpeg_recorder_start_stop_registers(tmp_path: Path) -> None:
     assert len(fake_db.calls) == 5
     assert fake_db.calls[0]["match_id"] == 42
     assert logger.session_dir is not None and logger.log_path().parent.exists()
+
+
+def test_ffmpeg_manager_download_and_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    paths.user_data_root.cache_clear()
+    try:
+        quality = ffmpeg_command_builder.resolve_quality_preset("standard")
+        settings = config_handler.RecordingSettings(
+            save_directory=tmp_path / "captures",
+            quality_preset=quality.name,
+            bitrate=quality.video_bitrate,
+            audio_bitrate=quality.audio_bitrate,
+            fps=quality.fps,
+            profile="16:9",
+            ffmpeg_path=None,
+            auto_download_ffmpeg=True,
+            ffmpeg_enabled=True,
+            audio_device=None,
+            video_source="desktop",
+        )
+        settings.ensure_directories()
+
+        status = ffmpeg_manager.inspect(settings)
+        assert status.managed is True
+        assert status.exists is False
+
+        ensured = ffmpeg_manager.ensure(settings, allow_download=True)
+        assert ensured.exists is True
+        assert ensured.path.exists()
+
+        updated = ffmpeg_manager.remove(settings)
+        assert updated.exists is False
+        assert not ensured.path.exists()
+    finally:
+        paths.user_data_root.cache_clear()

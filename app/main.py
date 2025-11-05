@@ -35,7 +35,7 @@ from app.function import (
 from app.function.cmn_config import load_config
 from app.function.cmn_logger import log_db_error
 from app.function.cmn_resources import get_text
-from app.function.core import config_handler, paths, ui_notify, versioning
+from app.function.core import config_handler, ffmpeg_manager, paths, ui_notify, versioning
 from app.function.core.backup_restore import RestoreReport
 from app.function.core.recorder import FFmpegRecorder, RecordingError, RecordingResult
 from app.function.core.version import __version__
@@ -220,6 +220,11 @@ class DuelPerformanceService:
             )
         return self._recorder
 
+    def _ffmpeg_status(self) -> ffmpeg_manager.FFmpegStatus:
+        """現在の FFmpeg 実行ファイルの状態を返します。"""
+
+        return ffmpeg_manager.inspect(self.recording_settings)
+
     def recording_snapshot(self) -> dict[str, Any]:
         """録画設定と直近の実行結果を辞書化して返します。"""
 
@@ -235,6 +240,8 @@ class DuelPerformanceService:
                 "bitrate": self._last_recording_result.bitrate,
             }
 
+        status = self._ffmpeg_status()
+
         return {
             "settings": self.recording_settings.to_dict(),
             "is_recording": is_recording,
@@ -242,6 +249,7 @@ class DuelPerformanceService:
             "active_quality_preset": self.recording_settings.quality_preset,
             "last_recording": last_recording,
             "last_screenshot": self._last_screenshot_path,
+            "ffmpeg": status.to_dict(),
         }
 
     def update_recording_settings(self, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -264,6 +272,45 @@ class DuelPerformanceService:
         )
         return self.recording_snapshot()
 
+    def enable_ffmpeg(self, *, download: bool = False) -> dict[str, Any]:
+        """FFmpeg を有効化し、必要に応じてバイナリを用意します。"""
+
+        status = self._ffmpeg_status()
+        allow_download = download or self.recording_settings.auto_download_ffmpeg
+
+        if not status.exists:
+            if not allow_download:
+                raise ValueError(f"FFmpeg が見つかりません: {status.path}")
+            try:
+                status = ffmpeg_manager.ensure(self.recording_settings, allow_download=True)
+            except FileNotFoundError as exc:
+                raise ValueError(str(exc)) from exc
+
+        merged = self.recording_settings.to_dict()
+        merged["ffmpeg_enabled"] = True
+        settings = config_handler.RecordingSettings.from_mapping(
+            merged, prefer_explicit=True
+        )
+        self._set_recording_settings(settings)
+        return self.recording_snapshot()
+
+    def disable_ffmpeg(self, *, remove: bool = False) -> dict[str, Any]:
+        """FFmpeg を無効化し、希望に応じてバイナリを削除します。"""
+
+        if self._recorder and self._recorder.is_running():
+            raise ValueError("録画中は FFmpeg を無効化できません")
+
+        if remove:
+            ffmpeg_manager.remove(self.recording_settings)
+
+        merged = self.recording_settings.to_dict()
+        merged["ffmpeg_enabled"] = False
+        settings = config_handler.RecordingSettings.from_mapping(
+            merged, prefer_explicit=True
+        )
+        self._set_recording_settings(settings)
+        return self.recording_snapshot()
+
     def start_recording(
         self,
         *,
@@ -271,6 +318,13 @@ class DuelPerformanceService:
         profile: str | None = None,
     ) -> str:
         """録画を開始し、生成されたファイルパスを文字列で返します。"""
+
+        if not self.recording_settings.ffmpeg_enabled:
+            raise ValueError("FFmpeg は無効化されています")
+
+        status = self._ffmpeg_status()
+        if not status.exists:
+            raise ValueError(f"FFmpeg が見つかりません: {status.path}")
 
         if profile and profile != self.recording_settings.profile:
             merged = self.recording_settings.to_dict()
@@ -1235,6 +1289,7 @@ def _build_snapshot(state: Optional[AppState] = None) -> dict[str, Any]:
             "active_quality_preset": fallback_settings.quality_preset,
             "last_recording": None,
             "last_screenshot": None,
+            "ffmpeg": ffmpeg_manager.inspect(fallback_settings).to_dict(),
         }
     return data
 
@@ -1312,6 +1367,8 @@ def _normalize_recording_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         normalized["auto_download_ffmpeg"] = _coerce_bool(
             payload["auto_download_ffmpeg"]
         )
+    if "ffmpeg_enabled" in payload:
+        normalized["ffmpeg_enabled"] = _coerce_bool(payload["ffmpeg_enabled"])
     if "audio_device" in payload:
         normalized["audio_device"] = str(payload["audio_device"]).strip()
     if "video_source" in payload:
@@ -1359,6 +1416,38 @@ def update_recording_settings(payload: dict[str, Any] | None = None) -> dict[str
 
     snapshot = service.update_recording_settings(normalized)
     ui_notify.notify("録画設定を保存しました", duration=2.4)
+    return {"ok": True, "recording": snapshot}
+
+
+@eel.expose
+def enable_ffmpeg(payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """FFmpeg を有効化し、必要に応じて取得します。"""
+
+    service = _ensure_service()
+    options = payload or {}
+    download = _coerce_bool(options.get("download"))
+    try:
+        snapshot = service.enable_ffmpeg(download=download)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    ui_notify.notify("FFmpeg を有効化しました", duration=2.4)
+    return {"ok": True, "recording": snapshot}
+
+
+@eel.expose
+def disable_ffmpeg(payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """FFmpeg を無効化し、希望があれば削除します。"""
+
+    service = _ensure_service()
+    options = payload or {}
+    remove = _coerce_bool(options.get("remove"))
+    try:
+        snapshot = service.disable_ffmpeg(remove=remove)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    ui_notify.notify("FFmpeg を無効化しました", duration=2.4)
     return {"ok": True, "recording": snapshot}
 
 
