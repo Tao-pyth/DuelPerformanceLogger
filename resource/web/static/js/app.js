@@ -41,6 +41,15 @@ const recordingFfmpegPathInput = document.getElementById("recording-ffmpeg-path"
 const recordingAutoDownloadInput = document.getElementById("recording-auto-download");
 const recordingAudioDeviceInput = document.getElementById("recording-audio-device");
 const recordingVideoSourceInput = document.getElementById("recording-video-source");
+const recordingQualityOptions = document.querySelectorAll(
+  "input[name='recording-quality'][data-quality-value]"
+);
+const recordingQualityLabelEl = document.getElementById("recording-quality-label");
+const recordingSummaryFpsEl = document.getElementById("recording-summary-fps");
+const recordingSummaryBitrateEl = document.getElementById("recording-summary-bitrate");
+const recordingSummaryAudioBitrateEl = document.getElementById(
+  "recording-summary-audio-bitrate"
+);
 const recordingMatchIdInput = document.getElementById("recording-match-id");
 const recordingStartButton = document.getElementById("recording-start");
 const recordingStopButton = document.getElementById("recording-stop");
@@ -140,6 +149,14 @@ const keywordToggleState = {
 let deckAnalysisData = [];
 let opponentAnalysisData = [];
 let recordingState = null;
+
+const RECORDING_QUALITY_PRESETS = {
+  standard: { label: "標準", fps: 60, videoBitrate: "6000k", audioBitrate: "160k" },
+  high: { label: "高画質", fps: 60, videoBitrate: "12000k", audioBitrate: "192k" },
+  light: { label: "軽量", fps: 30, videoBitrate: "4000k", audioBitrate: "128k" },
+};
+
+let recordingQualityPresetValue = "standard";
 
 const SEASON_FILTER_ALL = "__ALL__";
 const SEASON_FILTER_RANK = "__RANK__";
@@ -1702,6 +1719,63 @@ function updateMatchEntryView() {
   refreshKeywordToggleList("entry", latestSnapshot?.keywords ?? [], { selected: [] });
 }
 
+function resolveRecordingQualityPreset(name) {
+  const key = (name || "").toLowerCase();
+  return RECORDING_QUALITY_PRESETS[key] ?? RECORDING_QUALITY_PRESETS.standard;
+}
+
+function updateRecordingQualityUI(presetName, overrides = null) {
+  recordingQualityPresetValue = (presetName || recordingQualityPresetValue || "standard")
+    .toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(RECORDING_QUALITY_PRESETS, recordingQualityPresetValue)) {
+    recordingQualityPresetValue = "standard";
+  }
+
+  const preset = resolveRecordingQualityPreset(recordingQualityPresetValue);
+  const label = overrides?.quality_label || preset.label;
+  const fps = overrides?.fps ?? preset.fps;
+  const videoBitrate = overrides?.bitrate ?? preset.videoBitrate;
+  const audioBitrate = overrides?.audio_bitrate ?? preset.audioBitrate;
+
+  recordingQualityOptions.forEach((input) => {
+    const value = input.dataset.qualityValue || input.value;
+    input.checked = value === recordingQualityPresetValue;
+  });
+
+  if (recordingBitrateInput) {
+    recordingBitrateInput.value = videoBitrate ?? "";
+  }
+  if (recordingAudioBitrateInput) {
+    recordingAudioBitrateInput.value = audioBitrate ?? "";
+  }
+  if (recordingFpsInput) {
+    recordingFpsInput.value = fps ?? "";
+  }
+  if (recordingQualityLabelEl) {
+    recordingQualityLabelEl.textContent = label || "―";
+  }
+  if (recordingSummaryFpsEl) {
+    recordingSummaryFpsEl.textContent = fps ? `${fps} FPS` : "―";
+  }
+  if (recordingSummaryBitrateEl) {
+    recordingSummaryBitrateEl.textContent = videoBitrate || "―";
+  }
+  if (recordingSummaryAudioBitrateEl) {
+    recordingSummaryAudioBitrateEl.textContent = audioBitrate || "―";
+  }
+
+  return preset;
+}
+
+function getSelectedRecordingQualityPreset() {
+  for (const input of recordingQualityOptions) {
+    if (input.checked) {
+      return (input.dataset.qualityValue || input.value || "standard").toLowerCase();
+    }
+  }
+  return recordingQualityPresetValue || "standard";
+}
+
 function applyRecordingSnapshot(recording) {
   recordingState = recording || null;
 
@@ -1714,17 +1788,10 @@ function applyRecordingSnapshot(recording) {
 
   const settings = recording.settings ?? {};
 
+  updateRecordingQualityUI(settings.quality_preset, settings);
+
   if (recordingSaveDirectoryInput) {
     recordingSaveDirectoryInput.value = settings.save_directory ?? "";
-  }
-  if (recordingBitrateInput) {
-    recordingBitrateInput.value = settings.bitrate ?? "";
-  }
-  if (recordingAudioBitrateInput) {
-    recordingAudioBitrateInput.value = settings.audio_bitrate ?? "";
-  }
-  if (recordingFpsInput) {
-    recordingFpsInput.value = settings.fps ?? "";
   }
   if (recordingProfileSelect && settings.profile) {
     recordingProfileSelect.value = settings.profile;
@@ -1745,9 +1812,19 @@ function applyRecordingSnapshot(recording) {
   if (recordingStatusLabel) {
     const statusText = recording.is_recording ? "録画中" : "待機";
     const profileLabel = recording.active_profile || settings.profile || "";
-    recordingStatusLabel.textContent = profileLabel
-      ? `状態：${statusText}（${profileLabel}）`
-      : `状態：${statusText}`;
+    const quality = resolveRecordingQualityPreset(
+      recording.active_quality_preset || settings.quality_preset
+    );
+    const qualityLabel = settings.quality_label || quality.label;
+    const labels = [];
+    if (profileLabel) {
+      labels.push(profileLabel);
+    }
+    if (qualityLabel) {
+      labels.push(qualityLabel);
+    }
+    const suffix = labels.length ? `（${labels.join(" / ")}）` : "";
+    recordingStatusLabel.textContent = `状態：${statusText}${suffix}`;
   }
 
   if (recordingStartButton) {
@@ -2394,14 +2471,25 @@ if (matchDetailEditButton) {
   });
 }
 
+if (recordingQualityOptions.length > 0) {
+  Array.from(recordingQualityOptions).forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked) {
+        updateRecordingQualityUI(input.dataset.qualityValue || input.value);
+      }
+    });
+  });
+}
+
+updateRecordingQualityUI(recordingQualityPresetValue);
+
 if (recordingSettingsForm) {
   recordingSettingsForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const payload = {
       save_directory: recordingSaveDirectoryInput?.value?.trim() ?? "",
-      bitrate: recordingBitrateInput?.value?.trim() ?? "",
-      audio_bitrate: recordingAudioBitrateInput?.value?.trim() ?? "",
+      quality_preset: getSelectedRecordingQualityPreset(),
       profile: recordingProfileSelect?.value ?? "",
       ffmpeg_path: recordingFfmpegPathInput?.value?.trim() ?? "",
       auto_download_ffmpeg: recordingAutoDownloadInput?.checked ?? false,
@@ -2409,21 +2497,22 @@ if (recordingSettingsForm) {
       video_source: recordingVideoSourceInput?.value?.trim() ?? "",
     };
 
-    const fpsValue = recordingFpsInput?.value?.trim() ?? "";
-    if (fpsValue !== "") {
-      const fpsNumber = Number.parseInt(fpsValue, 10);
-      if (!Number.isInteger(fpsNumber) || fpsNumber <= 0) {
-        showNotification("FPS には 1 以上の数値を入力してください", 4200);
-        return;
-      }
-      payload.fps = fpsNumber;
-    }
+    const selectedPreset = resolveRecordingQualityPreset(payload.quality_preset);
 
     if (!hasEel) {
+      const offlineSettings = {
+        ...payload,
+        bitrate: selectedPreset.videoBitrate,
+        audio_bitrate: selectedPreset.audioBitrate,
+        fps: selectedPreset.fps,
+        quality_label: selectedPreset.label,
+      };
       applyRecordingSnapshot({
-        settings: payload,
+        settings: offlineSettings,
         is_recording: recordingState?.is_recording ?? false,
         active_profile: payload.profile || recordingState?.active_profile || "",
+        active_quality_preset:
+          payload.quality_preset || recordingState?.active_quality_preset || "",
         last_recording: recordingState?.last_recording ?? null,
         last_screenshot: recordingState?.last_screenshot ?? null,
       });

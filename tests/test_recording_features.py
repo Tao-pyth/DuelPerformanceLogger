@@ -18,7 +18,7 @@ def test_recording_settings_round_trip(tmp_path: Path) -> None:
     initial = {
         "recording": {
             "save_directory": str(tmp_path / "captures"),
-            "bitrate": "4500k",
+            "bitrate": "4000k",
             "audio_bitrate": "128k",
             "fps": 30,
             "profile": "21:9",
@@ -31,23 +31,27 @@ def test_recording_settings_round_trip(tmp_path: Path) -> None:
     config_handler.save_app_settings(initial, settings_path)
 
     loaded = config_handler.load_recording_settings(settings_path)
-    assert loaded.bitrate == "4500k"
+    assert loaded.quality_preset == "light"
+    assert loaded.bitrate == "4000k"
     assert loaded.profile == "21:9"
     assert loaded.save_directory.exists()
 
-    loaded.bitrate = "8000k"
-    payload = config_handler.update_recording_settings(loaded)
-    assert payload["recording"]["bitrate"] == "8000k"
+    updated = config_handler.RecordingSettings.from_mapping(
+        {**loaded.to_dict(), "quality_preset": "high"},
+        prefer_explicit=True,
+    )
+    payload = config_handler.update_recording_settings(updated)
+    assert payload["recording"]["quality_preset"] == "high"
+    assert payload["recording"]["bitrate"] == "12000k"
 
 
 def test_command_builder_profiles() -> None:
     profile = ffmpeg_command_builder.resolve_profile("21:9")
+    quality = ffmpeg_command_builder.resolve_quality_preset("standard")
     command = ffmpeg_command_builder.build_record_command(
         "ffmpeg",
         Path("output.mp4"),
-        fps=60,
-        video_bitrate="5000k",
-        audio_bitrate="160k",
+        quality=quality,
         profile=profile,
     )
     assert "-video_size" in command
@@ -112,11 +116,13 @@ def test_ffmpeg_recorder_start_stop_registers(tmp_path: Path) -> None:
     ffmpeg_path = tmp_path / "ffmpeg"
     ffmpeg_path.write_text("#!/bin/sh\n", encoding="utf-8")
 
+    quality = ffmpeg_command_builder.resolve_quality_preset("light")
     settings = config_handler.RecordingSettings(
         save_directory=capture_dir,
-        bitrate="5000k",
-        audio_bitrate="160k",
-        fps=30,
+        quality_preset=quality.name,
+        bitrate=quality.video_bitrate,
+        audio_bitrate=quality.audio_bitrate,
+        fps=quality.fps,
         profile="16:9",
         ffmpeg_path=ffmpeg_path,
         auto_download_ffmpeg=False,

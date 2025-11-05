@@ -14,6 +14,7 @@ from .ffmpeg_command_builder import (
     build_record_command,
     build_screenshot_command,
     resolve_profile,
+    resolve_quality_preset,
 )
 from .file_sanitizer import ensure_extension, sanitize_filename
 from . import record_integrity, session_logging
@@ -58,6 +59,7 @@ class FFmpegRecorder:
         self._process: subprocess.Popen | None = None
         self._log_handle = None
         self._current_profile = resolve_profile(settings.profile)
+        self._current_quality = resolve_quality_preset(settings.quality_preset)
         self._current_output: Optional[Path] = None
 
     # ------------------------------------------------------------------
@@ -79,12 +81,11 @@ class FFmpegRecorder:
         self._log_handle = open(log_path, "a", encoding="utf-8")
 
         self._current_profile = resolve_profile(self.settings.profile)
+        self._current_quality = resolve_quality_preset(self.settings.quality_preset)
         command = build_record_command(
             executable,
             output_path,
-            fps=self.settings.fps,
-            video_bitrate=self.settings.bitrate,
-            audio_bitrate=self.settings.audio_bitrate,
+            quality=self._current_quality,
             profile=self._current_profile,
             video_source=self.settings.video_source,
             audio_device=self.settings.audio_device,
@@ -121,8 +122,8 @@ class FFmpegRecorder:
         result = RecordingResult(
             file_path=self._current_output,
             profile=self._current_profile,
-            fps=self.settings.fps,
-            bitrate=self.settings.bitrate,
+            fps=self._current_quality.fps,
+            bitrate=self._current_quality.video_bitrate,
             duration=None,
             status=status,
         )
@@ -132,8 +133,8 @@ class FFmpegRecorder:
                 match_id,
                 self._current_output,
                 profile=self._current_profile.name,
-                fps=self.settings.fps,
-                bitrate=self.settings.bitrate,
+                fps=self._current_quality.fps,
+                bitrate=self._current_quality.video_bitrate,
                 status=status,
                 duration=None,
             )

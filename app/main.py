@@ -239,6 +239,7 @@ class DuelPerformanceService:
             "settings": self.recording_settings.to_dict(),
             "is_recording": is_recording,
             "active_profile": self.recording_settings.profile,
+            "active_quality_preset": self.recording_settings.quality_preset,
             "last_recording": last_recording,
             "last_screenshot": self._last_screenshot_path,
         }
@@ -252,9 +253,15 @@ class DuelPerformanceService:
             if key in merged:
                 merged[key] = value
 
-        settings = config_handler.RecordingSettings.from_mapping(merged)
+        settings = config_handler.RecordingSettings.from_mapping(
+            merged, prefer_explicit=True
+        )
         self._set_recording_settings(settings)
-        logger.info("Recording settings updated: profile=%s", settings.profile)
+        logger.info(
+            "Recording settings updated: profile=%s quality=%s",
+            settings.profile,
+            settings.quality_preset,
+        )
         return self.recording_snapshot()
 
     def start_recording(
@@ -268,16 +275,19 @@ class DuelPerformanceService:
         if profile and profile != self.recording_settings.profile:
             merged = self.recording_settings.to_dict()
             merged["profile"] = profile
-            settings = config_handler.RecordingSettings.from_mapping(merged)
+            settings = config_handler.RecordingSettings.from_mapping(
+                merged, prefer_explicit=True
+            )
             self._set_recording_settings(settings)
 
         recorder = self._ensure_recorder()
         output_path = recorder.start(match_id=match_id)
         self._last_recording_result = None
         logger.info(
-            "Recording started (match_id=%s, profile=%s, path=%s)",
+            "Recording started (match_id=%s, profile=%s, quality=%s, path=%s)",
             match_id,
             self.recording_settings.profile,
+            self.recording_settings.quality_preset,
             output_path,
         )
         return str(output_path)
@@ -1222,6 +1232,7 @@ def _build_snapshot(state: Optional[AppState] = None) -> dict[str, Any]:
             "settings": fallback_settings.to_dict(),
             "is_recording": False,
             "active_profile": fallback_settings.profile,
+            "active_quality_preset": fallback_settings.quality_preset,
             "last_recording": None,
             "last_screenshot": None,
         }
@@ -1291,15 +1302,8 @@ def _normalize_recording_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
 
     if "save_directory" in payload:
         normalized["save_directory"] = str(payload["save_directory"]).strip()
-    if "bitrate" in payload:
-        normalized["bitrate"] = str(payload["bitrate"]).strip()
-    if "audio_bitrate" in payload:
-        normalized["audio_bitrate"] = str(payload["audio_bitrate"]).strip()
-    if "fps" in payload:
-        try:
-            normalized["fps"] = int(payload["fps"])
-        except (TypeError, ValueError) as exc:
-            raise ValueError("FPS は整数で指定してください") from exc
+    if "quality_preset" in payload:
+        normalized["quality_preset"] = str(payload["quality_preset"]).strip().lower()
     if "profile" in payload:
         normalized["profile"] = str(payload["profile"]).strip()
     if "ffmpeg_path" in payload:

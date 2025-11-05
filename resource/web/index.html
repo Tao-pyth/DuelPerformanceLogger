@@ -823,18 +823,65 @@
                 <span>保存先ディレクトリ</span>
                 <input type="text" id="recording-save-directory" name="save_directory" required />
               </label>
-              <label class="form-field">
-                <span>ビデオビットレート</span>
-                <input type="text" id="recording-bitrate" name="bitrate" required />
-              </label>
-              <label class="form-field">
-                <span>オーディオビットレート</span>
-                <input type="text" id="recording-audio-bitrate" name="audio_bitrate" />
-              </label>
-              <label class="form-field">
-                <span>FPS</span>
-                <input type="number" id="recording-fps" name="fps" min="1" step="1" required />
-              </label>
+              <div class="form-field">
+                <span>画質テンプレート</span>
+                <div class="recording-quality-options" role="radiogroup">
+                  <label class="recording-quality-option">
+                    <input
+                      type="radio"
+                      name="recording-quality"
+                      value="standard"
+                      data-quality-value="standard"
+                    />
+                    <span class="recording-quality-option__title">標準</span>
+                    <span class="recording-quality-option__description">60 FPS / 6000 kbps</span>
+                  </label>
+                  <label class="recording-quality-option">
+                    <input
+                      type="radio"
+                      name="recording-quality"
+                      value="high"
+                      data-quality-value="high"
+                    />
+                    <span class="recording-quality-option__title">高画質</span>
+                    <span class="recording-quality-option__description">60 FPS / 12000 kbps</span>
+                  </label>
+                  <label class="recording-quality-option">
+                    <input
+                      type="radio"
+                      name="recording-quality"
+                      value="light"
+                      data-quality-value="light"
+                    />
+                    <span class="recording-quality-option__title">軽量</span>
+                    <span class="recording-quality-option__description">30 FPS / 4000 kbps</span>
+                  </label>
+                </div>
+              </div>
+              <div class="recording-quality-summary" aria-live="polite">
+                <p class="recording-quality-summary__title">選択中のテンプレート</p>
+                <dl class="recording-quality-summary__details">
+                  <div>
+                    <dt>テンプレート</dt>
+                    <dd id="recording-quality-label">―</dd>
+                  </div>
+                  <div>
+                    <dt>FPS</dt>
+                    <dd id="recording-summary-fps">―</dd>
+                  </div>
+                  <div>
+                    <dt>ビデオビットレート</dt>
+                    <dd id="recording-summary-bitrate">―</dd>
+                  </div>
+                  <div>
+                    <dt>オーディオビットレート</dt>
+                    <dd id="recording-summary-audio-bitrate">―</dd>
+                  </div>
+                </dl>
+              </div>
+              <input type="hidden" id="recording-bitrate" data-quality-field="bitrate" />
+              <input type="hidden" id="recording-audio-bitrate" data-quality-field="audio_bitrate" />
+              <input type="hidden" id="recording-fps" data-quality-field="fps" />
               <label class="form-field">
                 <span>プロファイル</span>
                 <select id="recording-profile" name="profile">
