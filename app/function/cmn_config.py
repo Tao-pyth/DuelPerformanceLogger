@@ -36,7 +36,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default_privacy": "unlisted",
         "title_template": "{deck} vs {opponent} ({date})",
         "description_template": "Duel result: {result}\\nDeck: {deck}\\nSeason: {season}",
+        # Number of automatic attempts the retry queue will perform before
+        # surfacing a failure to the UI.
         "retry.max_attempts": "3",
+        # Seconds to wait between retry attempts for YouTube uploads and
+        # recording operations managed by :class:`RetryQueue`.
         "retry.backoff_sec": "15",
     },
 }

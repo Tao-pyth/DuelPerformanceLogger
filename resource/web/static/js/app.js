@@ -127,6 +127,7 @@ const YOUTUBE_STATUS_MAP = {
   2: { label: "送信中...", tone: "warning" },
   3: { label: "送信完了", tone: "success" },
   4: { label: "手動登録済", tone: "info" },
+  5: { label: "再試行上限", tone: "danger" },
 };
 
 const YOUTUBE_AUTH_STATUS_TONES = {
