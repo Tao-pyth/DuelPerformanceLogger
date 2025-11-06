@@ -16,6 +16,7 @@ import base64
 import logging
 import os
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -453,7 +454,7 @@ class DuelPerformanceService:
             "season_id": normalized_season_id,
         }
 
-    def register_match(self, payload: dict[str, object]) -> AppState:
+    def register_match(self, payload: dict[str, object]) -> OperationResult:
         """対戦結果を保存し状態を更新します。
 
         入力
@@ -465,7 +466,9 @@ class DuelPerformanceService:
         処理概要
             1. デッキ名・先攻後攻・勝敗など必須項目の妥当性を検証します。
             2. キーワードやシーズン ID を正規化し、登録用辞書 ``match_record`` を生成します。
-            3. :meth:`DatabaseManager.record_match` を呼び出し、処理後に :meth:`refresh_state` を返します。
+            3. :meth:`DatabaseManager.record_match` を呼び出し新規 ID を取得します。
+            4. 自動処理の指定があれば録画停止やアップロードを実行し、結果をレスポンスへ含めます。
+            5. :meth:`refresh_state` の結果と付随情報を :class:`OperationResult` で返します。
         """
         deck_name = str(payload.get("deck_name", "")).strip()
         if not deck_name:
@@ -511,8 +514,195 @@ class DuelPerformanceService:
         if normalized_season_id is None and season_name:
             match_record["season_name"] = season_name
 
-        self.db.record_match(match_record)
-        return self.refresh_state()
+        match_id = self.db.record_match(match_record)
+        automation_payload = payload.get("automation") if isinstance(payload, Mapping) else None
+        automation_result = self._handle_register_automation(match_id, automation_payload)
+        state = self.refresh_state()
+        if automation_result:
+            return OperationResult(state=state, data={"automation": automation_result})
+        return OperationResult(state=state)
+
+    def _handle_register_automation(
+        self,
+        match_id: int,
+        automation_payload: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """登録時に要求された録画/アップロード自動処理を実行します。"""
+
+        if match_id <= 0:
+            return None
+        if not automation_payload or not isinstance(automation_payload, Mapping):
+            return None
+
+        mode_value = automation_payload.get("mode", "result_only")
+        mode = str(mode_value or "result_only").strip() or "result_only"
+        result: dict[str, Any] = {"mode": mode}
+
+        if mode != "record_and_register":
+            return result
+
+        recording_info: dict[str, Any] = {
+            "requested": True,
+            "status": "inactive",
+            "path": None,
+            "error": None,
+            "profile": self.recording_settings.profile,
+            "bitrate": self.recording_settings.bitrate,
+            "fps": self.recording_settings.fps,
+        }
+        upload_info: dict[str, Any] = {
+            "requested": False,
+            "status": "skipped",
+            "url": None,
+            "error": None,
+        }
+        result["recording"] = recording_info
+        result["upload"] = upload_info
+        job_info: dict[str, Any] | None = None
+
+        if not self.recording_settings.ffmpeg_enabled:
+            recording_info["status"] = "failed"
+            recording_info["error"] = "FFmpeg は無効化されています"
+            return result
+
+        recorder = self._recorder
+        if recorder is None or not recorder.is_running():
+            recording_info["status"] = "inactive"
+            recording_info["error"] = "録画が開始されていません"
+            return result
+
+        try:
+            recording_result = self.stop_recording(match_id=match_id)
+        except (RecordingError, ValueError) as exc:
+            recording_info["status"] = "failed"
+            recording_info["error"] = str(exc)
+            return result
+
+        recording_info["path"] = str(recording_result.file_path)
+        recording_info["profile"] = recording_result.profile.name
+        recording_info["bitrate"] = recording_result.bitrate
+        recording_info["fps"] = recording_result.fps
+        recording_info["status"] = recording_result.status or "completed"
+
+        if recording_result.status != "completed":
+            recording_info["status"] = "failed"
+            recording_info["error"] = "録画ファイルの整合性チェックに失敗しました"
+            return result
+
+        try:
+            job_id = self.db.create_upload_job(match_id, recording_result.file_path, status="pending")
+        except DatabaseError as exc:
+            message = str(exc)
+            recording_info["status"] = "failed"
+            recording_info["error"] = message
+            upload_info["status"] = "failed"
+            upload_info["error"] = message
+            return result
+
+        job_info = {
+            "id": job_id,
+            "status": "pending",
+            "path": recording_info["path"],
+        }
+        result["job"] = job_info
+        upload_info["requested"] = True
+
+        if not self._youtube_enabled():
+            upload_info["status"] = "queued"
+            return result
+
+        try:
+            match = self.db.fetch_match(match_id)
+        except DatabaseError as exc:
+            message = str(exc)
+            upload_info["status"] = "failed"
+            upload_info["error"] = message
+            job_info["status"] = "failed"
+            self.db.update_upload_job(job_id, status="failed", error_message=message)
+            return result
+
+        settings = self._youtube_settings()
+        title_template = settings.get("title_template", "{deck} vs {opponent} ({date})")
+        description_template = settings.get(
+            "description_template",
+            "Duel result: {result}\nDeck: {deck}\nSeason: {season}",
+        )
+        context = self._match_template_context(match)
+        title = self._render_youtube_template(title_template, context)
+        description = self._render_youtube_template(description_template, context)
+        privacy = str(settings.get("default_privacy", "unlisted") or "unlisted")
+
+        try:
+            uploader = self._ensure_youtube_uploader()
+        except ValueError as exc:
+            message = str(exc)
+            upload_info["status"] = "failed"
+            upload_info["error"] = message
+            job_info["status"] = "failed"
+            self.db.update_upload_job(job_id, status="failed", error_message=message)
+            return result
+
+        try:
+            self.db.update_upload_job(job_id, status="uploading", error_message="")
+        except DatabaseError as exc:
+            message = str(exc)
+            upload_info["status"] = "failed"
+            upload_info["error"] = message
+            job_info["status"] = "failed"
+            return result
+
+        self.db.record_youtube_in_progress(match_id)
+
+        try:
+            upload_result = uploader.upload_video(
+                recording_result.file_path,
+                title,
+                description,
+                privacy_status=privacy,
+            )
+        except FileNotFoundError:
+            message = f"録画ファイルが見つかりません: {recording_info['path']}"
+            upload_info["status"] = "failed"
+            upload_info["error"] = message
+            job_info["status"] = "failed"
+            self.db.update_upload_job(job_id, status="failed", error_message=message)
+            self.db.record_youtube_failure(match_id)
+            return result
+        except YouTubeUploadError as exc:
+            message = f"YouTube へのアップロードに失敗しました: {exc}"
+            upload_info["status"] = "failed"
+            upload_info["error"] = message
+            job_info["status"] = "failed"
+            self.db.update_upload_job(job_id, status="failed", error_message=message)
+            self.db.record_youtube_failure(match_id)
+            logger.error("Automatic YouTube upload failed", exc_info=exc)
+            return result
+        except Exception as exc:  # pragma: no cover - defensive
+            message = "YouTube アップロード中に予期しないエラーが発生しました"
+            upload_info["status"] = "failed"
+            upload_info["error"] = message
+            job_info["status"] = "failed"
+            self.db.update_upload_job(job_id, status="failed", error_message=message)
+            self.db.record_youtube_failure(match_id)
+            logger.error("Unexpected error during automatic upload", exc_info=exc)
+            return result
+
+        self.db.record_youtube_success(match_id, upload_result.url, upload_result.video_id)
+        self.db.update_upload_job(
+            job_id,
+            status="uploaded",
+            error_message="",
+            youtube_url=upload_result.url,
+            youtube_video_id=upload_result.video_id,
+        )
+        job_info["status"] = "uploaded"
+        upload_info["status"] = "uploaded"
+        upload_info["url"] = upload_result.url
+        upload_info["error"] = None
+        upload_info["video_id"] = upload_result.video_id
+        if getattr(upload_result, "log_path", None):
+            self.db.set_metadata("youtube_last_log", str(upload_result.log_path))
+        return result
 
     def delete_deck(self, name: str) -> AppState:
         """指定されたデッキを削除し状態を更新します。
@@ -1294,6 +1484,14 @@ def _build_snapshot(state: Optional[AppState] = None) -> dict[str, Any]:
     return data
 
 
+@dataclass(slots=True)
+class OperationResult:
+    """成功時の状態と追加データをまとめて返すコンテナ。"""
+
+    state: AppState | None = None
+    data: dict[str, Any] | None = None
+
+
 def _operation_response(service: DuelPerformanceService, func) -> dict[str, Any]:
     """操作実行とレスポンス整形を共通化します。
 
@@ -1310,7 +1508,7 @@ def _operation_response(service: DuelPerformanceService, func) -> dict[str, Any]
         2. 成功時は :func:`_build_snapshot` を用いて最新状態を添付します。
     """
     try:
-        state = func()
+        outcome = func()
     except DuplicateEntryError as exc:
         return {"ok": False, "error": str(exc)}
     except DatabaseError as exc:
@@ -1319,11 +1517,29 @@ def _operation_response(service: DuelPerformanceService, func) -> dict[str, Any]
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     else:
-        if isinstance(state, AppState):
-            snapshot = _build_snapshot(state)
+        extra: dict[str, Any] | None = None
+        state_obj: AppState | None = None
+
+        if isinstance(outcome, OperationResult):
+            state_obj = outcome.state
+            extra = outcome.data
+        elif isinstance(outcome, tuple) and outcome:
+            candidate = outcome[0]
+            if isinstance(candidate, AppState):
+                state_obj = candidate
+                extra = outcome[1] if len(outcome) > 1 else None
+        elif isinstance(outcome, AppState):
+            state_obj = outcome
+
+        if isinstance(state_obj, AppState):
+            snapshot = _build_snapshot(state_obj)
         else:
             snapshot = _build_snapshot()
-        return {"ok": True, "snapshot": snapshot}
+
+        response: dict[str, Any] = {"ok": True, "snapshot": snapshot}
+        if extra is not None:
+            response["data"] = extra
+        return response
 
 
 def _coerce_optional_int(value: Any) -> int | None:

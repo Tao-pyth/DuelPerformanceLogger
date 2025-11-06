@@ -207,6 +207,60 @@ def test_record_youtube_state_transitions(temp_db: Path) -> None:
     assert row["youtube_video_id"] == ""
 
 
+def test_upload_job_lifecycle(temp_db: Path, tmp_path: Path) -> None:
+    manager = DatabaseManager(temp_db)
+    manager.ensure_database()
+
+    with manager.transaction() as connection:
+        deck_id = connection.execute(
+            "INSERT INTO decks (name, description) VALUES (?, ?)",
+            ("Deck", ""),
+        ).lastrowid
+        match_id = connection.execute(
+            """
+            INSERT INTO matches (match_no, deck_id, season_id, turn, opponent_deck, keywords, memo, result)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, deck_id, None, 1, "Auto", json.dumps([]), "", 1),
+        ).lastrowid
+
+    recording_dir = tmp_path / "recordings"
+    recording_dir.mkdir(parents=True, exist_ok=True)
+    recording_path = recording_dir / "match.mp4"
+    recording_path.write_bytes(b"video")
+
+    job_id = manager.create_upload_job(match_id, recording_path)
+    assert job_id > 0
+
+    job = manager.fetch_upload_job(match_id)
+    assert job is not None
+    assert job["status"] == "pending"
+    assert Path(job["recording_path"]).name == "match.mp4"
+
+    manager.update_upload_job(
+        job_id,
+        status="uploaded",
+        youtube_url="https://youtu.be/example",
+        youtube_video_id="example",
+    )
+    updated = manager.fetch_upload_job(match_id)
+    assert updated["status"] == "uploaded"
+    assert updated["youtube_url"] == "https://youtu.be/example"
+    assert updated["youtube_video_id"] == "example"
+
+    replacement = manager.create_upload_job(
+        match_id,
+        recording_path.with_name("match_v2.mp4"),
+        status="failed",
+        error_message="integrity error",
+    )
+    assert replacement == job_id
+    final = manager.fetch_upload_job(match_id)
+    assert final["status"] == "failed"
+    assert final["error_message"] == "integrity error"
+    assert Path(final["recording_path"]).name == "match_v2.mp4"
+
+
 def test_e2e_restart_keeps_data(temp_db: Path) -> None:
     first = DatabaseManager(temp_db)
     first.ensure_database()

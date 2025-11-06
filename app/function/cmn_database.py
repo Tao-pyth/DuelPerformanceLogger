@@ -116,6 +116,37 @@ def migrate_032_to_041(db: "DatabaseManager") -> None:
                 )
 
 
+def migrate_041_to_042(db: "DatabaseManager") -> None:
+    """Introduce upload job tracking table for v0.4.2."""
+
+    with db.transaction() as connection:
+        if not db._table_exists(connection, "upload_jobs"):
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS upload_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    match_id INTEGER NOT NULL UNIQUE,
+                    recording_path TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    error_message TEXT DEFAULT '',
+                    youtube_url TEXT DEFAULT '',
+                    youtube_video_id TEXT DEFAULT '',
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    FOREIGN KEY(match_id) REFERENCES matches(id)
+                        ON DELETE CASCADE
+                        ON UPDATE CASCADE
+                )
+                """
+            )
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_upload_jobs_match_id ON upload_jobs(match_id)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_upload_jobs_status ON upload_jobs(status)"
+            )
+
+
 def migrate_legacy_to_020(db: "DatabaseManager") -> None:
     # 旧版→0.2.0 のベースへ。構造補完は _migrate_schema 前段で済むため実処理は不要。
     pass
@@ -127,6 +158,7 @@ MIGRATION_CHAIN: list[MigrationStep] = [
     (Version("0.3.0"), Version("0.3.1"), migrate_030_to_031),
     (Version("0.3.1"), Version("0.3.2"), migrate_031_to_032),
     (Version("0.3.2"), Version("0.4.1"), migrate_032_to_041),
+    (Version("0.4.1"), Version("0.4.2"), migrate_041_to_042),
 ]
 
 
@@ -817,6 +849,33 @@ class DatabaseManager:
                 )
                 schema_changed = True
 
+            if not self._table_exists(connection, "upload_jobs"):
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS upload_jobs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        match_id INTEGER NOT NULL UNIQUE,
+                        recording_path TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        error_message TEXT DEFAULT '',
+                        youtube_url TEXT DEFAULT '',
+                        youtube_video_id TEXT DEFAULT '',
+                        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                        updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                        FOREIGN KEY(match_id) REFERENCES matches(id)
+                            ON DELETE CASCADE
+                            ON UPDATE CASCADE
+                    )
+                    """
+                )
+                connection.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_upload_jobs_match_id ON upload_jobs(match_id)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_upload_jobs_status ON upload_jobs(status)"
+                )
+                schema_changed = True
+
             self._ensure_default_keywords(connection)
 
         if schema_changed:
@@ -1293,8 +1352,8 @@ class DatabaseManager:
             log_error("Failed to delete season", exc, name=name)
             raise DatabaseError("Failed to delete season") from exc
 
-    def record_match(self, record: dict[str, object]) -> None:
-        """対戦ログを 1 件保存します。
+    def record_match(self, record: dict[str, object]) -> int:
+        """対戦ログを 1 件保存し、生成された ID を返します。
 
         必須キー: ``match_no``, ``deck_name``, ``turn``, ``result``
         任意キー: ``opponent_deck``, ``keywords``（イテラブル可）
@@ -1361,7 +1420,7 @@ class DatabaseManager:
                 if filtered_keywords and not keyword_ids:
                     raise DatabaseError("存在しないキーワードが含まれています")
                 keywords_json = json.dumps(keyword_ids, ensure_ascii=False)
-                connection.execute(
+                cursor = connection.execute(
                     """
                     INSERT INTO matches (
                         match_no,
@@ -1422,6 +1481,7 @@ class DatabaseManager:
                         """,
                         (identifier,),
                     )
+                return int(cursor.lastrowid)
         except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
             log_error("Failed to record match", exc, record=record)
             raise DatabaseError("Failed to record match") from exc
@@ -1460,6 +1520,129 @@ class DatabaseManager:
                 file_path=path_text,
             )
             raise DatabaseError("Failed to register recording") from exc
+
+    def create_upload_job(
+        self,
+        match_id: int,
+        file_path: Path | str,
+        *,
+        status: str = "pending",
+        error_message: str = "",
+    ) -> int:
+        """録画ファイルに紐付くアップロードジョブを作成します。"""
+
+        path_text = str(Path(file_path))
+        try:
+            with self._connect() as connection:
+                try:
+                    cursor = connection.execute(
+                        """
+                        INSERT INTO upload_jobs (
+                            match_id,
+                            recording_path,
+                            status,
+                            error_message,
+                            youtube_url,
+                            youtube_video_id
+                        )
+                        VALUES (?, ?, ?, ?, '', '')
+                        """,
+                        (match_id, path_text, status, error_message or ""),
+                    )
+                    return int(cursor.lastrowid)
+                except sqlite3.IntegrityError:
+                    connection.execute(
+                        """
+                        UPDATE upload_jobs
+                        SET recording_path = ?,
+                            status = ?,
+                            error_message = ?,
+                            updated_at = strftime('%s', 'now')
+                        WHERE match_id = ?
+                        """,
+                        (path_text, status, error_message or "", match_id),
+                    )
+                    row = connection.execute(
+                        "SELECT id FROM upload_jobs WHERE match_id = ?",
+                        (match_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise DatabaseError("Failed to upsert upload job")
+                    return int(row["id"])
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error(
+                "Failed to register upload job",
+                exc,
+                match_id=match_id,
+                file_path=path_text,
+            )
+            raise DatabaseError("Failed to register upload job") from exc
+
+    def update_upload_job(
+        self,
+        job_id: int,
+        *,
+        status: str | None = None,
+        error_message: str | None = None,
+        youtube_url: str | None = None,
+        youtube_video_id: str | None = None,
+    ) -> None:
+        """アップロードジョブの状態を更新します。"""
+
+        updates: list[str] = []
+        params: list[object] = []
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if error_message is not None:
+            updates.append("error_message = ?")
+            params.append(error_message)
+        if youtube_url is not None:
+            updates.append("youtube_url = ?")
+            params.append(youtube_url)
+        if youtube_video_id is not None:
+            updates.append("youtube_video_id = ?")
+            params.append(youtube_video_id)
+
+        if not updates:
+            return
+
+        updates.append("updated_at = strftime('%s', 'now')")
+        query = f"UPDATE upload_jobs SET {', '.join(updates)} WHERE id = ?"
+        params.append(job_id)
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(query, tuple(params))
+                if cursor.rowcount == 0:
+                    raise DatabaseError("Upload job not found")
+        except sqlite3.DatabaseError as exc:  # pragma: no cover - defensive
+            log_error("Failed to update upload job", exc, job_id=job_id)
+            raise DatabaseError("Failed to update upload job") from exc
+
+    def fetch_upload_job(self, match_id: int) -> dict[str, object] | None:
+        """指定した対戦に紐付くアップロードジョブを取得します。"""
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                SELECT
+                    id,
+                    match_id,
+                    recording_path,
+                    status,
+                    error_message,
+                    youtube_url,
+                    youtube_video_id,
+                    created_at,
+                    updated_at
+                FROM upload_jobs
+                WHERE match_id = ?
+                """,
+                (match_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row is not None else None
 
     def fetch_opponent_decks(self) -> list[dict[str, object]]:
         """登録済みの対戦相手デッキ一覧を名称順で返却。"""

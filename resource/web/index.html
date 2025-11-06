@@ -412,6 +412,31 @@
                   </div>
                 </fieldset>
 
+                <fieldset class="match-entry-fieldset match-entry-fieldset--compact">
+                  <legend>登録モード</legend>
+                  <div class="match-entry-options-group">
+                    <span class="match-entry-sublegend">登録方法</span>
+                    <div class="match-entry-options">
+                      <label class="match-entry-option">
+                        <input
+                          type="radio"
+                          name="entry_mode"
+                          value="result_only"
+                          checked
+                        />
+                        <span class="match-entry-option__label">結果のみ登録</span>
+                      </label>
+                      <label class="match-entry-option">
+                        <input type="radio" name="entry_mode" value="record_and_register" />
+                        <span class="match-entry-option__label">録画と登録</span>
+                      </label>
+                    </div>
+                  </div>
+                  <p class="match-entry-hint">
+                    録画モードを選択すると、先攻/後攻を確定したタイミングで録画を開始します。
+                  </p>
+                </fieldset>
+
                 <label class="match-entry-select">
                   <span class="match-entry-select__label">対戦相手デッキ</span>
                   <input
@@ -451,6 +476,40 @@
 
               <div class="match-entry-actions">
                 <button type="submit" class="primary-button">対戦情報を登録</button>
+              </div>
+
+              <div
+                id="match-entry-automation-result"
+                class="match-entry-automation"
+                hidden
+              >
+                <div class="match-entry-automation__content">
+                  <span
+                    id="match-entry-automation-message"
+                    class="match-entry-automation__message"
+                  ></span>
+                  <a
+                    id="match-entry-automation-link"
+                    class="match-entry-automation__link"
+                    href="#"
+                    target="_blank"
+                    rel="noopener"
+                    hidden
+                  ></a>
+                  <code
+                    id="match-entry-automation-path"
+                    class="match-entry-automation__value"
+                    hidden
+                  ></code>
+                </div>
+                <button
+                  type="button"
+                  class="secondary-button"
+                  id="match-entry-automation-copy"
+                  hidden
+                >
+                  コピー
+                </button>
               </div>
             </form>
           </section>

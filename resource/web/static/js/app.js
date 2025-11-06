@@ -66,6 +66,17 @@ const keywordTableBody = document.querySelector("#keyword-table tbody");
 const matchKeywordsContainer = document.getElementById("match-keywords");
 const matchKeywordsInput = document.getElementById("match-keywords-input");
 const matchEntryMemoInput = document.getElementById("match-entry-memo");
+const matchEntryAutomationContainer = document.getElementById("match-entry-automation-result");
+const matchEntryAutomationMessageEl = document.getElementById("match-entry-automation-message");
+const matchEntryAutomationLinkEl = document.getElementById("match-entry-automation-link");
+const matchEntryAutomationPathEl = document.getElementById("match-entry-automation-path");
+const matchEntryAutomationCopyButton = document.getElementById("match-entry-automation-copy");
+const matchEntryAutomationModeInputs = matchEntryForm
+  ? matchEntryForm.querySelectorAll("input[name='entry_mode']")
+  : [];
+const matchEntryTurnInputs = matchEntryForm
+  ? matchEntryForm.querySelectorAll("input[name='turn']")
+  : [];
 const matchListTableBody = document.querySelector("#match-list-table tbody");
 const matchDetailTimestampEl = document.getElementById("match-detail-timestamp");
 const matchDetailDeckEl = document.getElementById("match-detail-deck");
@@ -153,6 +164,9 @@ let deckAnalysisData = [];
 let opponentAnalysisData = [];
 let recordingState = null;
 let isTogglingFfmpeg = false;
+let matchEntryAutomationMode = "result_only";
+let matchEntryAutomationRecordingStarted = false;
+let matchEntryAutomationCopyValue = "";
 
 const RECORDING_QUALITY_PRESETS = {
   standard: { label: "標準", fps: 60, videoBitrate: "6000k", audioBitrate: "160k" },
@@ -1721,6 +1735,183 @@ function updateMatchEntryView() {
     selectedValue: "",
   });
   refreshKeywordToggleList("entry", latestSnapshot?.keywords ?? [], { selected: [] });
+  resetMatchEntryAutomationState();
+}
+
+function resetMatchEntryAutomationState() {
+  matchEntryAutomationRecordingStarted = false;
+  if (matchEntryAutomationModeInputs.length > 0) {
+    let selectedMode = "result_only";
+    matchEntryAutomationModeInputs.forEach((input) => {
+      if (input.checked) {
+        selectedMode = input.value || selectedMode;
+      }
+    });
+    matchEntryAutomationMode = selectedMode || "result_only";
+  } else {
+    matchEntryAutomationMode = "result_only";
+  }
+}
+
+function resetMatchEntryAutomationResult() {
+  matchEntryAutomationCopyValue = "";
+  if (matchEntryAutomationContainer) {
+    matchEntryAutomationContainer.hidden = true;
+    matchEntryAutomationContainer.removeAttribute("data-tone");
+  }
+  if (matchEntryAutomationMessageEl) {
+    matchEntryAutomationMessageEl.textContent = "";
+  }
+  if (matchEntryAutomationLinkEl) {
+    matchEntryAutomationLinkEl.hidden = true;
+    matchEntryAutomationLinkEl.removeAttribute("href");
+    matchEntryAutomationLinkEl.textContent = "";
+  }
+  if (matchEntryAutomationPathEl) {
+    matchEntryAutomationPathEl.hidden = true;
+    matchEntryAutomationPathEl.textContent = "";
+  }
+  if (matchEntryAutomationCopyButton) {
+    matchEntryAutomationCopyButton.hidden = true;
+    matchEntryAutomationCopyButton.textContent = "コピー";
+  }
+}
+
+function showMatchEntryAutomationResult({ message, url = "", path = "", tone = "info" }) {
+  if (!matchEntryAutomationContainer) {
+    return;
+  }
+  matchEntryAutomationContainer.hidden = false;
+  matchEntryAutomationContainer.dataset.tone = tone;
+  if (matchEntryAutomationMessageEl) {
+    matchEntryAutomationMessageEl.textContent = message || "";
+  }
+  if (matchEntryAutomationLinkEl) {
+    if (url) {
+      matchEntryAutomationLinkEl.hidden = false;
+      matchEntryAutomationLinkEl.href = url;
+      matchEntryAutomationLinkEl.textContent = url;
+    } else {
+      matchEntryAutomationLinkEl.hidden = true;
+      matchEntryAutomationLinkEl.removeAttribute("href");
+      matchEntryAutomationLinkEl.textContent = "";
+    }
+  }
+  if (matchEntryAutomationPathEl) {
+    if (path) {
+      matchEntryAutomationPathEl.hidden = false;
+      matchEntryAutomationPathEl.textContent = path;
+    } else {
+      matchEntryAutomationPathEl.hidden = true;
+      matchEntryAutomationPathEl.textContent = "";
+    }
+  }
+  const copyValue = url || path || "";
+  matchEntryAutomationCopyValue = copyValue;
+  if (matchEntryAutomationCopyButton) {
+    if (copyValue) {
+      matchEntryAutomationCopyButton.hidden = false;
+      matchEntryAutomationCopyButton.textContent = url ? "URLをコピー" : "パスをコピー";
+    } else {
+      matchEntryAutomationCopyButton.hidden = true;
+    }
+  }
+}
+
+function matchEntryHasTurnSelection() {
+  if (!matchEntryTurnInputs || matchEntryTurnInputs.length === 0) {
+    return false;
+  }
+  return Array.from(matchEntryTurnInputs).some((input) => input.checked);
+}
+
+function handleRegisterMatchAutomationResult(result) {
+  matchEntryAutomationRecordingStarted = false;
+  if (!result || result.mode !== "record_and_register") {
+    resetMatchEntryAutomationResult();
+    return;
+  }
+
+  const recording = result.recording || {};
+  const upload = result.upload || {};
+  let tone = "info";
+  let message = "自動処理を完了しました";
+  let url = typeof upload.url === "string" ? upload.url : "";
+  let path = typeof recording.path === "string" ? recording.path : "";
+
+  if (upload.status === "uploaded" && url) {
+    tone = "success";
+    message = "YouTube にアップロードしました";
+  } else if (upload.status === "queued") {
+    tone = "info";
+    message = "録画ファイルをアップロード待ちに追加しました";
+  } else if (upload.status === "failed") {
+    tone = "danger";
+    message = upload.error || "自動アップロードに失敗しました";
+    if (upload.error) {
+      showNotification(upload.error, 6000);
+    }
+  } else if (recording.status === "failed") {
+    tone = "danger";
+    message = recording.error || "録画の停止に失敗しました";
+    if (recording.error) {
+      showNotification(recording.error, 6000);
+    }
+  } else if (recording.status === "inactive") {
+    tone = "warning";
+    message = recording.error || "録画が開始されていなかったため自動処理をスキップしました";
+    path = "";
+    url = "";
+  } else if (recording.status === "completed") {
+    tone = "success";
+    message = "録画ファイルを保存しました";
+  }
+
+  showMatchEntryAutomationResult({ message, url, path, tone });
+}
+
+async function triggerAutomationRecordingStart() {
+  if (matchEntryAutomationRecordingStarted) {
+    return;
+  }
+  if (!hasEel) {
+    showNotification("録画機能は現在利用できません", 4200);
+    return;
+  }
+  const settings = recordingState?.settings;
+  if (settings && !settings.ffmpeg_enabled) {
+    showNotification("FFmpeg が無効化されています", 4200);
+    return;
+  }
+  const ffmpegInfo = recordingState?.ffmpeg;
+  if (ffmpegInfo && !ffmpegInfo.exists) {
+    showNotification("FFmpeg が見つかりません。設定を確認してください", 4200);
+    return;
+  }
+  if (recordingState?.is_recording) {
+    matchEntryAutomationRecordingStarted = true;
+    return;
+  }
+
+  matchEntryAutomationRecordingStarted = true;
+  try {
+    const response = await callPy("start_recording", buildRecordingPayload());
+    if (!response || response.ok !== true) {
+      const message = response?.error || "録画の開始に失敗しました";
+      matchEntryAutomationRecordingStarted = false;
+      showNotification(message, 4200);
+      return;
+    }
+    if (response.recording) {
+      applyRecordingSnapshot(response.recording);
+    }
+    if (response.path && recordingLastOutputEl) {
+      recordingLastOutputEl.textContent = response.path;
+    }
+  } catch (error) {
+    matchEntryAutomationRecordingStarted = false;
+    handleError(error, "録画の開始に失敗しました", { context: "start_recording" });
+  }
 }
 
 function resolveRecordingQualityPreset(name) {
@@ -2490,6 +2681,83 @@ if (opponentAnalysisFilter) {
   });
 }
 
+resetMatchEntryAutomationResult();
+
+if (matchEntryAutomationModeInputs.length > 0) {
+  matchEntryAutomationModeInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      if (!input.checked) {
+        return;
+      }
+      matchEntryAutomationMode = input.value || "result_only";
+      if (matchEntryAutomationMode !== "record_and_register") {
+        matchEntryAutomationRecordingStarted = false;
+        resetMatchEntryAutomationResult();
+        return;
+      }
+      if (recordingState) {
+        if (!recordingState.settings?.ffmpeg_enabled) {
+          showNotification("録画設定が無効なため自動録画を開始できません", 4800);
+          return;
+        }
+        if (!recordingState.ffmpeg?.exists) {
+          showNotification("FFmpeg が見つかりません。設定を確認してください", 4800);
+          return;
+        }
+      }
+      if (matchEntryHasTurnSelection()) {
+        triggerAutomationRecordingStart();
+      }
+    });
+  });
+}
+
+if (matchEntryAutomationCopyButton) {
+  matchEntryAutomationCopyButton.addEventListener("click", async () => {
+    if (!matchEntryAutomationCopyValue) {
+      showNotification("コピー対象がありません", 3600);
+      return;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(matchEntryAutomationCopyValue);
+        showNotification("コピーしました");
+        return;
+      }
+      throw new Error("clipboard_unavailable");
+    } catch (error) {
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = matchEntryAutomationCopyValue;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const succeeded = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        if (!succeeded) {
+          throw new Error("copy_failed");
+        }
+        showNotification("コピーしました");
+      } catch (fallbackError) {
+        console.error("Failed to copy automation value", fallbackError);
+        showNotification("コピーに失敗しました", 4200);
+      }
+    }
+  });
+}
+
+if (matchEntryTurnInputs.length > 0) {
+  matchEntryTurnInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      if (matchEntryAutomationMode === "record_and_register") {
+        triggerAutomationRecordingStart();
+      }
+    });
+  });
+}
+
 matchEntryForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!matchEntryState.deckName) {
@@ -2531,10 +2799,18 @@ matchEntryForm.addEventListener("submit", async (event) => {
   if (matchEntryState.seasonName) {
     payload.season_name = matchEntryState.seasonName;
   }
+  payload.automation = {
+    mode: matchEntryAutomationMode,
+  };
 
   try {
     const response = await callPy("register_match", payload);
     if (handleOperationResponse(response, "対戦情報を登録しました")) {
+      if (response?.data?.automation) {
+        handleRegisterMatchAutomationResult(response.data.automation);
+      } else {
+        resetMatchEntryAutomationResult();
+      }
       await beginMatchEntry(matchEntryState.deckName, {
         pushHistory: false,
         seasonId: matchEntryState.seasonId,
