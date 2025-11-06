@@ -59,6 +59,10 @@ const recordingStopButton = document.getElementById("recording-stop");
 const recordingScreenshotButton = document.getElementById("recording-screenshot");
 const recordingLastOutputEl = document.getElementById("recording-last-output");
 const recordingLastScreenshotEl = document.getElementById("recording-last-screenshot");
+const youtubeAuthStatusLabel = document.getElementById("youtube-auth-status-label");
+const youtubeAuthButton = document.getElementById("youtube-auth-start");
+const youtubeAuthUpdatedEl = document.getElementById("youtube-auth-updated");
+const youtubeAuthErrorEl = document.getElementById("youtube-auth-error");
 const keywordForm = document.getElementById("keyword-form");
 const keywordNameInput = document.getElementById("keyword-name");
 const keywordDescriptionInput = document.getElementById("keyword-description");
@@ -125,6 +129,16 @@ const YOUTUBE_STATUS_MAP = {
   4: { label: "手動登録済", tone: "info" },
 };
 
+const YOUTUBE_AUTH_STATUS_TONES = {
+  authorized: { label: "認証済み", tone: "success" },
+  expired: { label: "期限切れ (自動更新待ち)", tone: "warning" },
+  invalid: { label: "認証エラー", tone: "danger" },
+  unauthorized: { label: "未認証", tone: "info" },
+  unconfigured: { label: "クライアント未設定", tone: "danger" },
+  disabled: { label: "無効化されています", tone: "info" },
+  error: { label: "状態取得に失敗", tone: "danger" },
+};
+
 const viewElements = new Map();
 let currentView = "dashboard";
 
@@ -167,6 +181,8 @@ let isTogglingFfmpeg = false;
 let matchEntryAutomationMode = "result_only";
 let matchEntryAutomationRecordingStarted = false;
 let matchEntryAutomationCopyValue = "";
+let youtubeAuthState = null;
+let youtubeAuthBusy = false;
 
 const RECORDING_QUALITY_PRESETS = {
   standard: { label: "標準", fps: 60, videoBitrate: "6000k", audioBitrate: "160k" },
@@ -2276,6 +2292,152 @@ function applySnapshot(snapshot) {
   }
 }
 
+function applyYoutubeAuthStatus(status) {
+  youtubeAuthState = status ?? null;
+  if (!youtubeAuthStatusLabel) {
+    return;
+  }
+
+  const enabled = status?.enabled !== undefined ? Boolean(status.enabled) : true;
+  const derivedStatus = (() => {
+    if (!status) {
+      return "error";
+    }
+    if (!enabled) {
+      return "disabled";
+    }
+    if (status.status) {
+      return status.status;
+    }
+    if (status.authenticated) {
+      return "authorized";
+    }
+    return "unauthorized";
+  })();
+
+  const tone = YOUTUBE_AUTH_STATUS_TONES[derivedStatus] || YOUTUBE_AUTH_STATUS_TONES.error;
+  youtubeAuthStatusLabel.textContent = `状態：${tone.label}`;
+  if (tone.tone) {
+    youtubeAuthStatusLabel.setAttribute("data-tone", tone.tone);
+  } else {
+    youtubeAuthStatusLabel.removeAttribute("data-tone");
+  }
+
+  if (youtubeAuthUpdatedEl) {
+    const parts = [];
+    if (status?.expires_at) {
+      parts.push(`有効期限：${formatDateTime(status.expires_at)}`);
+    } else {
+      parts.push("有効期限：―");
+    }
+    if (status?.updated_at) {
+      parts.push(`更新：${formatDateTime(status.updated_at)}`);
+    }
+    youtubeAuthUpdatedEl.textContent = parts.join(" / ");
+    if (status?.message) {
+      youtubeAuthUpdatedEl.title = status.message;
+    } else {
+      youtubeAuthUpdatedEl.removeAttribute("title");
+    }
+  }
+
+  if (youtubeAuthErrorEl) {
+    youtubeAuthErrorEl.textContent = "";
+    youtubeAuthErrorEl.hidden = true;
+    youtubeAuthErrorEl.removeAttribute("data-tone");
+  }
+
+  if (youtubeAuthButton) {
+    const disabledByConfig = !enabled || derivedStatus === "unconfigured";
+    const busy = youtubeAuthBusy;
+    youtubeAuthButton.disabled = busy || disabledByConfig;
+    let label = "Google アカウントで認証";
+    if (busy) {
+      label = "ブラウザを起動しています...";
+    } else if (disabledByConfig && !enabled) {
+      label = "設定で有効化してください";
+    } else if (disabledByConfig) {
+      label = "クライアント情報を設定してください";
+    } else if (derivedStatus === "authorized") {
+      label = "再認証する";
+    }
+    youtubeAuthButton.textContent = label;
+  }
+}
+
+function presentYoutubeAuthError(message) {
+  const enabled = youtubeAuthState?.enabled ?? true;
+  applyYoutubeAuthStatus({ status: "error", enabled, authenticated: false });
+  if (youtubeAuthErrorEl) {
+    youtubeAuthErrorEl.textContent = message;
+    youtubeAuthErrorEl.hidden = false;
+    youtubeAuthErrorEl.setAttribute("data-tone", "danger");
+  }
+}
+
+async function refreshYoutubeAuthStatus({ silent = true } = {}) {
+  if (!youtubeAuthStatusLabel) {
+    return null;
+  }
+  if (!hasEel) {
+    applyYoutubeAuthStatus({ status: "disabled", enabled: false, authenticated: false });
+    return null;
+  }
+  try {
+    const response = await callPy("get_youtube_auth_status");
+    if (!response || response.ok !== true) {
+      const message = response?.error || "認証状態の取得に失敗しました";
+      presentYoutubeAuthError(message);
+      if (!silent) {
+        showNotification(message, 4200);
+      }
+      return null;
+    }
+    applyYoutubeAuthStatus(response.data || null);
+    return response.data || null;
+  } catch (error) {
+    if (!silent) {
+      handleError(error, "YouTube 認証状態の取得に失敗しました", {
+        context: "get_youtube_auth_status",
+      });
+    } else {
+      console.warn("Failed to fetch YouTube auth status", error);
+    }
+    presentYoutubeAuthError("YouTube 認証状態の取得に失敗しました");
+    return null;
+  }
+}
+
+async function beginYoutubeAuthFlow() {
+  if (!youtubeAuthButton || youtubeAuthBusy) {
+    return;
+  }
+  if (!hasEel) {
+    showNotification("デスクトップアプリでのみ認証できます", 4200);
+    return;
+  }
+  youtubeAuthBusy = true;
+  applyYoutubeAuthStatus(youtubeAuthState);
+  try {
+    const response = await callPy("start_youtube_auth_flow", {});
+    if (!response || response.ok !== true) {
+      const message = response?.error || "認証フローの開始に失敗しました";
+      presentYoutubeAuthError(message);
+      return;
+    }
+    applyYoutubeAuthStatus(response.data || null);
+    showNotification("YouTube の認証が完了しました");
+  } catch (error) {
+    handleError(error, "YouTube 認証の開始に失敗しました", {
+      context: "start_youtube_auth_flow",
+    });
+    presentYoutubeAuthError("認証の開始に失敗しました。再度お試しください");
+  } finally {
+    youtubeAuthBusy = false;
+    applyYoutubeAuthStatus(youtubeAuthState);
+  }
+}
+
 function showNotification(message, durationMs = 2400) {
   toastEl.textContent = message;
   toastEl.hidden = false;
@@ -2339,6 +2501,7 @@ async function fetchSnapshot({ silent = false } = {}) {
   try {
     const snapshot = await callPy("fetch_snapshot");
     applySnapshot(snapshot);
+    await refreshYoutubeAuthStatus({ silent: true });
     if (!silent) {
       showNotification("最新のデータを読み込みました");
     }
@@ -2346,6 +2509,7 @@ async function fetchSnapshot({ silent = false } = {}) {
     handleError(error, "データの取得に失敗しました", {
       context: "fetch_snapshot",
     });
+    await refreshYoutubeAuthStatus({ silent: true });
   }
 }
 
@@ -2823,6 +2987,12 @@ matchEntryForm.addEventListener("submit", async (event) => {
 });
 
 refreshButton.addEventListener("click", () => fetchSnapshot({ silent: false }));
+
+if (youtubeAuthButton) {
+  youtubeAuthButton.addEventListener("click", () => {
+    beginYoutubeAuthFlow();
+  });
+}
 
 if (matchListTableBody) {
   matchListTableBody.addEventListener("click", async (event) => {

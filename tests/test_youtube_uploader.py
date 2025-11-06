@@ -52,6 +52,14 @@ class _DummyService:
         return self._videos
 
 
+class _DummyCredentials:
+    def __init__(self, token: str = "token") -> None:
+        self.token = token
+
+    def apply(self, headers: dict[str, str]) -> None:  # pragma: no cover - interface
+        headers["authorization"] = f"Bearer {self.token}"
+
+
 def _patch_media_file_upload(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, object]]:
     calls: list[tuple[str, object]] = []
 
@@ -72,12 +80,14 @@ def test_upload_video_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     calls = _patch_media_file_upload(monkeypatch)
     videos = _DummyVideos({"id": "video123"})
 
-    def _factory(api_key: str) -> _DummyService:
-        assert api_key == "API_KEY"
+    dummy_credentials = _DummyCredentials()
+
+    def _factory(credentials: _DummyCredentials) -> _DummyService:
+        assert credentials is dummy_credentials
         return _DummyService(videos)
 
     uploader = youtube_uploader.YouTubeUploader(
-        api_key="API_KEY",
+        credentials_provider=lambda: dummy_credentials,
         upload_dir=uploads,
         default_privacy="unlisted",
         log_root=tmp_path / "logs",
@@ -108,7 +118,7 @@ def test_upload_video_missing_file(tmp_path: Path) -> None:
     uploads.mkdir()
 
     uploader = youtube_uploader.YouTubeUploader(
-        api_key="API_KEY",
+        credentials_provider=lambda: _DummyCredentials(),
         upload_dir=uploads,
         log_root=tmp_path / "logs",
         service_factory=lambda _: _DummyService(_DummyVideos({"id": "noop"})),
@@ -129,7 +139,7 @@ def test_upload_video_http_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     videos = _DummyVideos(None, error=error)
 
     uploader = youtube_uploader.YouTubeUploader(
-        api_key="API_KEY",
+        credentials_provider=lambda: _DummyCredentials(),
         upload_dir=uploads,
         log_root=tmp_path / "logs",
         service_factory=lambda _: _DummyService(videos),

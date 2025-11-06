@@ -872,6 +872,25 @@
             </dl>
           </section>
 
+          <section class="panel" aria-labelledby="youtube-auth-title">
+            <div class="panel__header">
+              <h3 id="youtube-auth-title">YouTube 連携</h3>
+              <p class="settings-subtext" id="youtube-auth-status-label">状態：未取得</p>
+            </div>
+            <div class="panel__body stack">
+              <p class="settings-subtext">
+                Google アカウントを認証すると、自動アップロード機能で録画を YouTube に送信できます。
+              </p>
+              <div class="settings-actions">
+                <button type="button" class="secondary-button" id="youtube-auth-start">
+                  Google アカウントで認証
+                </button>
+                <span class="settings-subtext" id="youtube-auth-updated">更新日時：―</span>
+              </div>
+              <p class="settings-subtext" id="youtube-auth-error" hidden></p>
+            </div>
+          </section>
+
           <section class="panel" aria-labelledby="recording-settings-title">
             <div class="panel__header">
               <h3 id="recording-settings-title">録画設定</h3>
