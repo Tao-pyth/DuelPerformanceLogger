@@ -40,10 +40,13 @@ from app.function.core import config_handler, ffmpeg_manager, paths, ui_notify, 
 from app.function.core.backup_restore import RestoreReport
 from app.function.core.recorder import FFmpegRecorder, RecordingError, RecordingResult
 from app.function.core.version import __version__
-from app.function.core.youtube_uploader import (
-    YouTubeUploadError,
-    YouTubeUploader,
+from app.function.core.youtube_auth import (
+    YouTubeAuthManager,
+    YouTubeTokenStore,
+    load_client_config as load_youtube_client_config,
+    resolve_redirect_port as resolve_youtube_redirect_port,
 )
+from app.function.core.youtube_uploader import YouTubeUploadError, YouTubeUploader
 
 logger = logging.getLogger(__name__)
 _WEB_ROOT = paths.web_root()
@@ -83,6 +86,7 @@ class DuelPerformanceService:
         self._last_screenshot_path: str | None = None
         self.db = DatabaseManager()
         self.youtube_uploader: YouTubeUploader | None = None
+        self.youtube_auth_manager: YouTubeAuthManager | None = None
         try:
             self.db.ensure_database()
         except (sqlite3.DatabaseError, DatabaseError) as exc:
@@ -93,6 +97,16 @@ class DuelPerformanceService:
             )
         self.migration_timestamp = (
             self.db.get_metadata("last_migration_message_at", "") or ""
+        )
+
+        youtube_settings = self._youtube_settings()
+        token_store = YouTubeTokenStore()
+        client_config = load_youtube_client_config(youtube_settings)
+        redirect_port = resolve_youtube_redirect_port(youtube_settings)
+        self.youtube_auth_manager = YouTubeAuthManager(
+            token_store=token_store,
+            client_config=client_config,
+            redirect_port=redirect_port,
         )
 
     # ------------------------------------------------------------------
@@ -939,6 +953,27 @@ class DuelPerformanceService:
         self.db.delete_match(match_id)
         return self.refresh_state()
 
+    def get_youtube_auth_status(self) -> dict[str, Any]:
+        if self.youtube_auth_manager is None:
+            raise ValueError("YouTube 認証マネージャーが初期化されていません")
+        enabled = self._youtube_config_enabled()
+        status = self.youtube_auth_manager.get_status()
+        status["enabled"] = enabled
+        status["client_configured"] = self.youtube_auth_manager.has_client_config()
+        if not enabled:
+            status.setdefault("status", "disabled")
+            status["authenticated"] = False
+            status.setdefault("message", "YouTube 連携は設定で無効化されています")
+        return status
+
+    def start_youtube_auth_flow(self) -> dict[str, Any]:
+        if not self._youtube_config_enabled():
+            raise ValueError("YouTube 連携は無効化されています")
+        if self.youtube_auth_manager is None:
+            raise ValueError("YouTube 認証マネージャーが初期化されていません")
+        self.youtube_auth_manager.start_browser_flow()
+        return self.get_youtube_auth_status()
+
     def retry_youtube_upload(
         self, match_id: int, recording_path: str | None = None
     ) -> AppState:
@@ -1080,21 +1115,29 @@ class DuelPerformanceService:
         settings = self.config.get("youtube", {})
         return dict(settings) if isinstance(settings, dict) else {}
 
-    def _youtube_enabled(self) -> bool:
+    def _youtube_config_enabled(self) -> bool:
         settings = self._youtube_settings()
         value = settings.get("enabled", False)
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on", "t", "y"}
         return bool(value)
 
+    def _youtube_enabled(self) -> bool:
+        if not self._youtube_config_enabled():
+            return False
+        if self.youtube_auth_manager is None:
+            return False
+        return self.youtube_auth_manager.has_credentials()
+
     def _ensure_youtube_uploader(self) -> YouTubeUploader:
         if self.youtube_uploader is not None:
             return self.youtube_uploader
 
         settings = self._youtube_settings()
-        api_key = str(settings.get("api_key", "") or "").strip()
-        if not api_key:
-            raise ValueError("YouTube API キーが設定されていません")
+        if self.youtube_auth_manager is None:
+            raise ValueError("YouTube 認証マネージャーが初期化されていません")
+        if not self.youtube_auth_manager.has_credentials():
+            raise ValueError("YouTube 認証が完了していません")
 
         upload_dir_setting = settings.get("upload_directory")
         if upload_dir_setting:
@@ -1103,7 +1146,7 @@ class DuelPerformanceService:
             base_dir = paths.recording_dir()
 
         uploader = YouTubeUploader(
-            api_key=api_key,
+            credentials_provider=self.youtube_auth_manager.ensure_credentials,
             upload_dir=base_dir,
             default_privacy=str(settings.get("default_privacy", "unlisted") or "unlisted"),
         )
@@ -2052,6 +2095,30 @@ def retry_youtube_upload(payload: dict[str, Any]) -> dict[str, Any]:
         service,
         lambda: service.retry_youtube_upload(match_id, recording_path=recording_path),
     )
+
+
+@eel.expose
+def start_youtube_auth_flow(_: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """YouTube OAuth 認証フローの開始リクエストを処理します。"""
+
+    service = _ensure_service()
+    try:
+        status = service.start_youtube_auth_flow()
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "data": status}
+
+
+@eel.expose
+def get_youtube_auth_status(_: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """YouTube OAuth 認証状態の取得リクエストを処理します。"""
+
+    service = _ensure_service()
+    try:
+        status = service.get_youtube_auth_status()
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "data": status}
 
 
 @eel.expose

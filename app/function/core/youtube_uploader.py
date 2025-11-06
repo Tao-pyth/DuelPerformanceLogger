@@ -14,6 +14,11 @@ from googleapiclient.http import MediaFileUpload
 
 from app.function.core import paths
 
+try:  # pragma: no cover - optional dependency typing guard
+    from google.oauth2.credentials import Credentials
+except Exception:  # pragma: no cover - import guard
+    Credentials = object  # type: ignore[assignment]
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -35,14 +40,14 @@ class YouTubeUploader:
 
     def __init__(
         self,
-        api_key: str,
+        credentials_provider: Callable[[], "Credentials"],
         upload_dir: str | Path,
         *,
         default_privacy: str = "unlisted",
         log_root: Path | None = None,
-        service_factory: Optional[Callable[[str], object]] = None,
+        service_factory: Optional[Callable[["Credentials"], object]] = None,
     ) -> None:
-        self.api_key = api_key
+        self._credentials_provider = credentials_provider
         self.upload_dir = Path(upload_dir)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.default_privacy = default_privacy
@@ -95,9 +100,15 @@ class YouTubeUploader:
         return YouTubeUploadResult(video_id=video_id, url=url, log_path=session_log)
 
     def _build_service(self) -> object:
+        credentials = self._credentials_provider()
         if self._service_factory is not None:
-            return self._service_factory(self.api_key)
-        return build("youtube", "v3", developerKey=self.api_key, cache_discovery=False)
+            return self._service_factory(credentials)
+        return build(
+            "youtube",
+            "v3",
+            credentials=credentials,
+            cache_discovery=False,
+        )
 
     def _open_session_log(self) -> Path:
         now = datetime.now(timezone.utc)

@@ -297,6 +297,30 @@ legend {
   color: rgba(255, 255, 255, 0.68);
 }
 
+.settings-subtext[data-tone="success"] {
+  color: #b9f5c8;
+}
+
+.settings-subtext[data-tone="danger"] {
+  color: #ffb4b4;
+}
+
+.settings-subtext[data-tone="warning"] {
+  color: #ffe17a;
+}
+
+.settings-subtext[data-tone="info"] {
+  color: #d6e9ff;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
 .settings-backup-actions {
   display: flex;
   flex-wrap: wrap;

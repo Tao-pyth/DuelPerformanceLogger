@@ -29,7 +29,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "youtube": {
         "enabled": "false",
-        "api_key": "",
+        "client_secret_path": "",
+        "client_id": "",
+        "client_secret": "",
+        "oauth_redirect_port": "8765",
         "default_privacy": "unlisted",
         "title_template": "{deck} vs {opponent} ({date})",
         "description_template": "Duel result: {result}\\nDeck: {deck}\\nSeason: {season}",
