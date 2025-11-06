@@ -2187,6 +2187,20 @@ class DatabaseManager:
                 checked_at=timestamp,
             )
 
+    def record_youtube_retry_limit(self, match_id: int) -> None:
+        """Mark a YouTube upload as exceeding the retry limit."""
+
+        timestamp = int(time.time())
+        with self.transaction() as connection:
+            self._update_youtube_metadata(
+                connection,
+                match_id,
+                flag=YouTubeSyncFlag.RETRY_LIMIT,
+                url="",
+                video_id="",
+                checked_at=timestamp,
+            )
+
     def record_youtube_manual(self, match_id: int, url: str, video_id: str | None = None) -> None:
         """手動で入力された YouTube URL を保存します。"""
 

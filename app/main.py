@@ -37,6 +37,7 @@ from app.function.cmn_config import load_config
 from app.function.cmn_logger import log_db_error
 from app.function.cmn_resources import get_text
 from app.function.core import config_handler, ffmpeg_manager, paths, ui_notify, versioning
+from app.function.core.retry_queue import RetryJobState, RetryQueue
 from app.function.core.backup_restore import RestoreReport
 from app.function.core.recorder import FFmpegRecorder, RecordingError, RecordingResult
 from app.function.core.version import __version__
@@ -52,6 +53,24 @@ logger = logging.getLogger(__name__)
 _WEB_ROOT = paths.web_root()
 _INDEX_FILE = "index.html"
 _SERVICE: Optional["DuelPerformanceService"] = None
+
+
+def _job_notify_success(message: str, *, duration: float = 2.8) -> None:
+    logger.info(message)
+    ui_notify.notify(message, duration=duration)
+
+
+def _job_notify_failure(
+    message: str,
+    *,
+    exc: Exception | None = None,
+    duration: float = 4.2,
+) -> None:
+    if exc is not None:
+        logger.error(message, exc_info=exc)
+    else:
+        logger.error(message)
+    ui_notify.notify(message, duration=duration)
 
 
 class DuelPerformanceService:
@@ -81,6 +100,7 @@ class DuelPerformanceService:
         """
         self.config = load_config()
         self.recording_settings = config_handler.load_recording_settings()
+        self.retry_queue = RetryQueue.from_mapping(self.config.get("youtube", {}))
         self._recorder: FFmpegRecorder | None = None
         self._last_recording_result: RecordingResult | None = None
         self._last_screenshot_path: str | None = None
@@ -232,6 +252,8 @@ class DuelPerformanceService:
             self._recorder = FFmpegRecorder(
                 self.recording_settings,
                 database=self.db,
+                retry_queue=self.retry_queue,
+                notifier=_job_notify_failure,
             )
         return self._recorder
 
@@ -665,57 +687,46 @@ class DuelPerformanceService:
             job_info["status"] = "failed"
             return result
 
-        self.db.record_youtube_in_progress(match_id)
-
-        try:
-            upload_result = uploader.upload_video(
-                recording_result.file_path,
-                title,
-                description,
-                privacy_status=privacy,
-            )
-        except FileNotFoundError:
-            message = f"録画ファイルが見つかりません: {recording_info['path']}"
-            upload_info["status"] = "failed"
-            upload_info["error"] = message
-            job_info["status"] = "failed"
-            self.db.update_upload_job(job_id, status="failed", error_message=message)
-            self.db.record_youtube_failure(match_id)
-            return result
-        except YouTubeUploadError as exc:
-            message = f"YouTube へのアップロードに失敗しました: {exc}"
-            upload_info["status"] = "failed"
-            upload_info["error"] = message
-            job_info["status"] = "failed"
-            self.db.update_upload_job(job_id, status="failed", error_message=message)
-            self.db.record_youtube_failure(match_id)
-            logger.error("Automatic YouTube upload failed", exc_info=exc)
-            return result
-        except Exception as exc:  # pragma: no cover - defensive
-            message = "YouTube アップロード中に予期しないエラーが発生しました"
-            upload_info["status"] = "failed"
-            upload_info["error"] = message
-            job_info["status"] = "failed"
-            self.db.update_upload_job(job_id, status="failed", error_message=message)
-            self.db.record_youtube_failure(match_id)
-            logger.error("Unexpected error during automatic upload", exc_info=exc)
-            return result
-
-        self.db.record_youtube_success(match_id, upload_result.url, upload_result.video_id)
-        self.db.update_upload_job(
-            job_id,
-            status="uploaded",
-            error_message="",
-            youtube_url=upload_result.url,
-            youtube_video_id=upload_result.video_id,
+        outcome, state, last_error = self._queue_youtube_upload(
+            match_id,
+            recording_result.file_path,
+            title=title,
+            description=description,
+            privacy=privacy,
+            reason="automation",
         )
-        job_info["status"] = "uploaded"
-        upload_info["status"] = "uploaded"
-        upload_info["url"] = upload_result.url
-        upload_info["error"] = None
-        upload_info["video_id"] = upload_result.video_id
-        if getattr(upload_result, "log_path", None):
-            self.db.set_metadata("youtube_last_log", str(upload_result.log_path))
+
+        if state is None or state.status == "succeeded":
+            url = getattr(outcome, "url", "") if outcome is not None else ""
+            video_id = getattr(outcome, "video_id", "") if outcome is not None else ""
+            self.db.update_upload_job(
+                job_id,
+                status="uploaded",
+                error_message="",
+                youtube_url=url,
+                youtube_video_id=video_id,
+            )
+            upload_info["url"] = url
+            upload_info["video_id"] = video_id
+            job_info["status"] = "uploaded"
+            upload_info["status"] = "uploaded"
+            upload_info["error"] = None
+            return result
+
+        message = "YouTube アップロードに失敗しました（再試行上限）"
+        if isinstance(last_error, FileNotFoundError):
+            message = f"録画ファイルが見つかりません: {recording_info['path']}"
+        elif isinstance(last_error, YouTubeUploadError):
+            message = f"YouTube へのアップロードに失敗しました: {last_error}"
+        elif isinstance(last_error, Exception):
+            message = "YouTube アップロード中に予期しないエラーが発生しました"
+
+        upload_info["status"] = "failed"
+        upload_info["error"] = message
+        upload_info["url"] = ""
+        upload_info["video_id"] = ""
+        job_info["status"] = "failed"
+        self.db.update_upload_job(job_id, status="failed", error_message=message)
         return result
 
     def delete_deck(self, name: str) -> AppState:
@@ -985,7 +996,6 @@ class DuelPerformanceService:
             raise ValueError("YouTube 連携は無効化されています")
 
         match = self.db.fetch_match(match_id)
-        uploader = self._ensure_youtube_uploader()
         video_path = self._resolve_recording_path(match, recording_path)
         settings = self._youtube_settings()
         title_template = settings.get(
@@ -1000,27 +1010,28 @@ class DuelPerformanceService:
         description = self._render_youtube_template(description_template, context)
         privacy = str(settings.get("default_privacy", "unlisted") or "unlisted")
 
-        self.db.record_youtube_in_progress(match_id)
-        try:
-            result = uploader.upload_video(
-                video_path, title, description, privacy_status=privacy
-            )
-        except FileNotFoundError as exc:
-            self.db.record_youtube_failure(match_id)
-            raise ValueError(f"録画ファイルが見つかりません: {video_path}") from exc
-        except YouTubeUploadError as exc:
-            self.db.record_youtube_failure(match_id)
-            logger.error("YouTube upload failed", exc_info=exc)
-            raise ValueError(f"YouTube へのアップロードに失敗しました: {exc}") from exc
-        except Exception as exc:  # pragma: no cover - defensive
-            self.db.record_youtube_failure(match_id)
-            logger.error("Unexpected error during YouTube upload", exc_info=exc)
-            raise DatabaseError("YouTube アップロード中に予期しないエラーが発生しました") from exc
+        _, state, last_error = self._queue_youtube_upload(
+            match_id,
+            video_path,
+            title=title,
+            description=description,
+            privacy=privacy,
+            reason="manual_retry",
+        )
 
-        self.db.record_youtube_success(match_id, result.url, result.video_id)
-        if result.log_path:
-            self.db.set_metadata("youtube_last_log", str(result.log_path))
-        return self.refresh_state()
+        if state is None or state.status == "succeeded":
+            return self.refresh_state()
+
+        if isinstance(last_error, FileNotFoundError):
+            raise ValueError(f"録画ファイルが見つかりません: {video_path}") from last_error
+        if isinstance(last_error, YouTubeUploadError):
+            raise ValueError(f"YouTube へのアップロードに失敗しました: {last_error}") from last_error
+        if isinstance(last_error, Exception):
+            raise DatabaseError(
+                "YouTube アップロード中に予期しないエラーが発生しました"
+            ) from last_error
+
+        raise ValueError("YouTube へのアップロードに失敗しました（再試行上限）")
 
     def set_youtube_url(self, match_id: int, url: str) -> AppState:
         """手動で指定された YouTube URL を登録します。"""
@@ -1177,6 +1188,73 @@ class DuelPerformanceService:
             if candidate.exists():
                 return candidate
         raise ValueError("録画ファイルが見つかりません。ファイルパスを指定してください")
+
+    def _queue_youtube_upload(
+        self,
+        match_id: int,
+        video_path: Path,
+        *,
+        title: str,
+        description: str,
+        privacy: str,
+        reason: str,
+    ) -> tuple[Any | None, RetryJobState | None, Exception | None]:
+        uploader = self._ensure_youtube_uploader()
+        path = Path(video_path)
+        last_error: Exception | None = None
+
+        def attempt() -> Any:
+            self.db.record_youtube_in_progress(match_id)
+            return uploader.upload_video(
+                path,
+                title,
+                description,
+                privacy_status=privacy,
+            )
+
+        def on_retry(exc: Exception, state: RetryJobState) -> None:
+            nonlocal last_error
+            last_error = exc
+            self.db.record_youtube_failure(match_id)
+            logger.warning(
+                "YouTube upload retry failed (attempt %s/%s, match=%s): %s",
+                state.attempts,
+                state.max_attempts,
+                match_id,
+                exc,
+            )
+
+        def on_failure(exc: Exception, state: RetryJobState) -> None:
+            nonlocal last_error
+            last_error = exc
+            self.db.record_youtube_retry_limit(match_id)
+            _job_notify_failure(
+                f"YouTube アップロードに失敗しました（対戦 ID: {match_id}）",
+                exc=exc,
+            )
+
+        def on_success(result: Any, state: RetryJobState) -> None:
+            self.db.record_youtube_success(match_id, result.url, result.video_id)
+            if getattr(result, "log_path", None):
+                self.db.set_metadata("youtube_last_log", str(result.log_path))
+            _job_notify_success(
+                f"YouTube へアップロードしました（対戦 ID: {match_id}）",
+                duration=2.4,
+            )
+
+        job_id = f"youtube:{match_id}"
+        outcome = self.retry_queue.run(
+            job_id,
+            attempt,
+            description=f"YouTube アップロード（対戦 ID: {match_id}）",
+            metadata={"match_id": match_id, "path": str(path), "reason": reason},
+            on_retry=on_retry,
+            on_failure=on_failure,
+            on_success=on_success,
+            raise_on_failure=False,
+        )
+        state = self.retry_queue.state(job_id)
+        return outcome, state, last_error
 
     def _candidate_recording_paths(
         self, base_dir: Path, match: dict[str, Any]

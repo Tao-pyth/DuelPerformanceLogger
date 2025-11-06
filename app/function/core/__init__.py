@@ -22,6 +22,7 @@ __all__ = [
     "file_sanitizer",
     "record_integrity",
     "recorder",
+    "retry_queue",
     "session_logging",
     "youtube_auth",
     "youtube_uploader",

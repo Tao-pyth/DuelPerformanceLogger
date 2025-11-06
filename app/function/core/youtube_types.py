@@ -31,3 +31,6 @@ class YouTubeSyncFlag(IntEnum):
     MANUAL = 4
     """手動で URL が登録された状態。"""
 
+    RETRY_LIMIT = 5
+    """自動再試行上限に達し、手動対応が必要な状態。"""
+
