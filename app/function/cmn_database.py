@@ -1420,24 +1420,28 @@ class DatabaseManager:
                 if filtered_keywords and not keyword_ids:
                     raise DatabaseError("存在しないキーワードが含まれています")
                 keywords_json = json.dumps(keyword_ids, ensure_ascii=False)
+                match_columns = (
+                    "match_no",
+                    "deck_id",
+                    "season_id",
+                    "turn",
+                    "opponent_deck",
+                    "keywords",
+                    "memo",
+                    "result",
+                    "youtube_flag",
+                    "youtube_url",
+                    "youtube_video_id",
+                    "youtube_checked_at",
+                    "favorite",
+                )
+                placeholders = ", ".join(["?"] * len(match_columns))
                 cursor = connection.execute(
-                    """
+                    f"""
                     INSERT INTO matches (
-                        match_no,
-                        deck_id,
-                        season_id,
-                        turn,
-                        opponent_deck,
-                        keywords,
-                        memo,
-                        result,
-                        youtube_flag,
-                        youtube_url,
-                        youtube_video_id,
-                        youtube_checked_at,
-                        favorite
+                        {', '.join(match_columns)}
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES ({placeholders})
                     """,
                     (
                         record.get("match_no", 0),

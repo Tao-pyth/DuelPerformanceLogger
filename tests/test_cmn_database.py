@@ -207,6 +207,37 @@ def test_record_youtube_state_transitions(temp_db: Path) -> None:
     assert row["youtube_video_id"] == ""
 
 
+def test_record_match_accepts_minimal_payload(temp_db: Path) -> None:
+    manager = DatabaseManager(temp_db)
+    manager.ensure_database()
+
+    with manager.transaction() as connection:
+        connection.execute(
+            "INSERT INTO decks (name, description) VALUES (?, ?)",
+            ("Minimal", ""),
+        )
+
+    match_id = manager.record_match(
+        {
+            "match_no": 1,
+            "deck_name": "Minimal",
+            "turn": "first",
+            "result": "win",
+        }
+    )
+
+    assert match_id > 0
+    with manager._connect() as connection:
+        row = connection.execute(
+            "SELECT match_no, deck_id, favorite FROM matches WHERE id = ?",
+            (match_id,),
+        ).fetchone()
+
+    assert row["match_no"] == 1
+    assert row["deck_id"] > 0
+    assert row["favorite"] == 0
+
+
 def test_upload_job_lifecycle(temp_db: Path, tmp_path: Path) -> None:
     manager = DatabaseManager(temp_db)
     manager.ensure_database()
