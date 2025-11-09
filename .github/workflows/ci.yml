@@ -63,3 +63,18 @@ jobs:
           Builder.load_file(str(gui_root / 'app.kv'))
           print('kv ok')
           PY
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run pytest
+        run: pytest --maxfail=1 --disable-warnings -q

@@ -1,15 +1,12 @@
-"""Duel Performance Logger の正規バージョン情報を提供するモジュール。
+"""Development metadata for Duel Performance Logger.
 
-記載内容
-    - ``__version__``: アプリケーションのセマンティックバージョン文字列。
-
-想定参照元
-    - :mod:`app.__init__` や UI 表示でのバージョン表記。
-    - テストコードによるバージョン検証。
+このモジュールで公開する ``__version__`` は、パッケージングやテスト用の
+開発メタデータとしてのみ利用します。UI 表示やログ出力でのバージョン表記は
+データベースの ``app_meta`` テーブルに保存された値を参照してください。
 """
 
 from __future__ import annotations
 
 __all__ = ["__version__"]
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
