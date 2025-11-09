@@ -26,4 +26,5 @@ __all__ = [
     "session_logging",
     "youtube_auth",
     "youtube_uploader",
+    "db_handler",
 ]

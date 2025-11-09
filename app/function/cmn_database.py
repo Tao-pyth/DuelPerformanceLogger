@@ -193,6 +193,12 @@ class DatabaseManager:
         "last_migration_message_at": "",
     }
 
+    def _app_meta_seed_values(self) -> dict[str, str]:
+        """Return seed values for the ``app_meta`` table derived from migrations."""
+
+        target_version = versioning.get_target_version()
+        return {"app_version": str(target_version)}
+
     DEFAULT_KEYWORDS: tuple[tuple[str, str], ...] = (
         ("相手の増G", "相手が増Gを使用した"),
         ("相手のうらら", "相手がはるうららを使用した"),
@@ -229,6 +235,7 @@ class DatabaseManager:
         # 保存先ディレクトリを事前に作成（既にあれば何もしない）
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._last_restore_report: backup_restore.RestoreReport | None = None
+        self._last_integrity_backup_archive: Path | None = None
 
     # ------------------------------------------------------------------
     # 低レベルヘルパー（接続生成）
@@ -526,6 +533,34 @@ class DatabaseManager:
         except sqlite3.DatabaseError:
             return False
 
+    def _create_integrity_backup_archive(self, stage: str) -> Path:
+        """Create and persist a ZIP archive for integrity-check failures."""
+
+        backup_dir, archive_name, payload = self.export_backup_zip()
+        archive_path = backup_dir.parent / archive_name
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        archive_path.write_bytes(payload)
+        self._last_integrity_backup_archive = archive_path
+        log_error(
+            "Database integrity check failed; backup archive created",
+            None,
+            stage=stage,
+            archive=str(archive_path),
+        )
+        return archive_path
+
+    def _guard_integrity(self, stage: str) -> None:
+        """Run ``PRAGMA integrity_check`` and abort with backup on failure."""
+
+        if not self._db_path.exists():
+            return
+        if self._is_integrity_ok():
+            return
+        archive_path = self._create_integrity_backup_archive(stage)
+        raise DatabaseError(
+            f"Database integrity check failed during {stage}; see {archive_path.name}",
+        )
+
     # ------------------------------------------------------------------
     # DB ライフサイクル管理
     # ------------------------------------------------------------------
@@ -551,6 +586,8 @@ class DatabaseManager:
 
         self.ensure_metadata_defaults()
         self._migrate_schema()
+        self.ensure_app_meta_defaults()
+        self._guard_integrity("post-migration")
 
     # ------------------------------------------------------------------
     # バージョン管理
@@ -656,6 +693,7 @@ class DatabaseManager:
                 target_version = self.SCHEMA_VERSION
                 effective_version = current_version if metadata_exists else 0
                 if effective_version < target_version:
+                    self._guard_integrity("pre-migration")
                     try:
                         self._create_backup_copy()
                     except Exception as exc:  # pragma: no cover - best effort logging
@@ -666,6 +704,7 @@ class DatabaseManager:
                         )
 
                     self._apply_migration_scripts(connection, effective_version, target_version)
+                    self._guard_integrity("post-sql-migration")
 
     # ------------------------------------------------------------------
     # メタデータ操作
@@ -683,6 +722,57 @@ class DatabaseManager:
                         "INSERT INTO db_metadata (key, value) VALUES (?, ?)",
                         (key, value),
                     )
+
+    def ensure_app_meta_defaults(self) -> None:
+        """Ensure the application metadata table exists and contains seed values."""
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_meta (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
+            for key, value in self._app_meta_seed_values().items():
+                connection.execute(
+                    "INSERT OR IGNORE INTO app_meta (key, value) VALUES (?, ?)",
+                    (key, str(value)),
+                )
+
+    def get_app_meta(self, key: str, default: str | None = None) -> str | None:
+        """Fetch a value from ``app_meta`` returning *default* if unavailable."""
+
+        try:
+            self.ensure_app_meta_defaults()
+        except sqlite3.DatabaseError:
+            return default
+
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT value FROM app_meta WHERE key = ?",
+                    (key,),
+                ).fetchone()
+        except sqlite3.DatabaseError:
+            return default
+
+        if not row:
+            return default
+        value = row["value"]
+        return str(value) if value is not None else default
+
+    def set_app_meta(self, key: str, value: str) -> None:
+        """Persist a value into the ``app_meta`` table."""
+
+        normalized = str(value)
+        self.ensure_app_meta_defaults()
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
+                (key, normalized),
+            )
 
     def _migrate_schema(self) -> None:
         """スキーマの不足分を補完し、バージョン番号の整合性を保つ。"""
@@ -1022,6 +1112,12 @@ class DatabaseManager:
 
         return self._last_restore_report
 
+    @property
+    def last_integrity_backup_archive(self) -> Path | None:
+        """Return the most recent integrity-check backup archive path if any."""
+
+        return self._last_integrity_backup_archive
+
     def export_backup_zip(
         self, destination: Optional[Path | str] = None
     ) -> tuple[Path, str, bytes]:
@@ -1075,6 +1171,7 @@ class DatabaseManager:
 
         self.initialize_database()
         self.ensure_metadata_defaults()
+        self.ensure_app_meta_defaults()
 
     # ------------------------------------------------------------------
     # 取得系ヘルパー

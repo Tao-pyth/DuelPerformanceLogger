@@ -12,17 +12,43 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import logging
 import os
 import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 from urllib.parse import parse_qs, urlparse
 
-import eel
+try:
+    import eel  # type: ignore
+except ModuleNotFoundError as exc:  # pragma: no cover - CLI fallback
+    if "--version" in sys.argv[1:]:
+        class _EelStub:
+            @staticmethod
+            def expose(func=None, *args, **kwargs):  # noqa: D401 - decorator stub
+                if func is None:
+                    def decorator(target):
+                        return target
+
+                    return decorator
+                return func
+
+            @staticmethod
+            def init(*args, **kwargs):  # pragma: no cover - CLI guard
+                raise RuntimeError("Eel runtime is unavailable in CLI mode")
+
+            @staticmethod
+            def start(*args, **kwargs):  # pragma: no cover - CLI guard
+                raise RuntimeError("Eel runtime is unavailable in CLI mode")
+
+        eel = _EelStub()  # type: ignore[assignment]
+    else:  # pragma: no cover - actual runtime dependency
+        raise
 
 from app.function import (
     AppState,
@@ -36,7 +62,14 @@ from app.function import (
 from app.function.cmn_config import load_config
 from app.function.cmn_logger import log_db_error
 from app.function.cmn_resources import get_text
-from app.function.core import config_handler, ffmpeg_manager, paths, ui_notify, versioning
+from app.function.core import (
+    config_handler,
+    db_handler,
+    ffmpeg_manager,
+    paths,
+    ui_notify,
+    versioning,
+)
 from app.function.core.retry_queue import RetryJobState, RetryQueue
 from app.function.core.backup_restore import RestoreReport
 from app.function.core.recorder import FFmpegRecorder, RecordingError, RecordingResult
@@ -118,6 +151,9 @@ class DuelPerformanceService:
         self.migration_timestamp = (
             self.db.get_metadata("last_migration_message_at", "") or ""
         )
+        self.app_version = db_handler.resolve_app_version(
+            __version__, manager=self.db
+        )
 
         youtube_settings = self._youtube_settings()
         token_store = YouTubeTokenStore()
@@ -198,6 +234,9 @@ class DuelPerformanceService:
             self.config,
             migration_result=self.migration_result,
             migration_timestamp=self.migration_timestamp,
+        )
+        self.app_version = db_handler.resolve_app_version(
+            __version__, manager=self.db, warn_on_missing=False
         )
         return set_app_state(state)
 
@@ -1573,6 +1612,14 @@ def _format_timestamp() -> str:
     return datetime.now().strftime("%H:%M:%S（%Y/%m/%d）")
 
 
+def _current_app_version() -> str:
+    """Return the application version stored in the database."""
+
+    if _SERVICE is not None:
+        return _SERVICE.app_version
+    return db_handler.resolve_app_version(__version__, warn_on_missing=False)
+
+
 def _build_snapshot(state: Optional[AppState] = None) -> dict[str, Any]:
     """AppState から UI 用スナップショット辞書を構築します。
 
@@ -1588,7 +1635,7 @@ def _build_snapshot(state: Optional[AppState] = None) -> dict[str, Any]:
     """
     snapshot_source = state or get_app_state()
     data = snapshot_source.snapshot()
-    data["version"] = __version__
+    data["version"] = _current_app_version()
     if _SERVICE is not None:
         data["recording"] = _SERVICE.recording_snapshot()
     else:
@@ -2330,7 +2377,22 @@ def reset_database(_: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     return _operation_response(service, service.reset_database)
 
 
-def main() -> None:
+def _parse_cli_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the launcher."""
+
+    parser = argparse.ArgumentParser(
+        prog="DuelPerformanceLogger",
+        description="Launch the Duel Performance Logger UI",
+    )
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="アプリケーションのバージョンを表示して終了します。",
+    )
+    return parser.parse_args(list(argv) if argv is not None else None)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
     """Eel アプリケーションを起動します。
 
     入力
@@ -2343,8 +2405,15 @@ def main() -> None:
         2. フロントエンドリソースを読み込み :func:`eel.start` で UI を起動します。
     """
 
+    args = _parse_cli_args(argv)
+    if getattr(args, "version", False):
+        version_text = db_handler.resolve_app_version(__version__)
+        print(version_text)
+        return
+
     logging.basicConfig(level=logging.INFO)
     service = _ensure_service()
+    logger.info("[DPL] version=%s", service.app_version)
     eel.init(str(_WEB_ROOT))
 
     # Preload data once so the first fetch does not need to hit disk.

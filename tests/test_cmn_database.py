@@ -9,7 +9,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.function.cmn_database import DatabaseManager
+from app.function.cmn_database import DatabaseError, DatabaseManager
+from app.function.core import paths, versioning
 from app.function.core.youtube_types import YouTubeSyncFlag
 
 
@@ -47,6 +48,8 @@ def test_initialize_database_preserves_existing_data(temp_db: Path) -> None:
     assert [row["name"] for row in decks] == ["Test Deck"]
     assert [row["memo"] for row in matches] == ["note"]
     assert tuple(youtube_row) == (0, "", None, None)
+    expected_version = str(versioning.get_target_version())
+    assert manager.get_app_meta("app_version") == expected_version
 
 
 def test_migration_updates_user_version_and_preserves_data(temp_db: Path) -> None:
@@ -133,6 +136,40 @@ def test_migration_updates_user_version_and_preserves_data(temp_db: Path) -> Non
         assert isinstance(rows["youtube_checked_at"], int)
     assert backup_files, "Expected migration backup file to be created"
     assert manager.get_schema_version() == DatabaseManager.CURRENT_SCHEMA_VERSION
+    expected_version = str(versioning.get_target_version())
+    assert manager.get_app_meta("app_version") == expected_version
+
+
+def test_app_meta_round_trip(temp_db: Path) -> None:
+    manager = DatabaseManager(temp_db)
+    manager.ensure_database()
+    expected_version = str(versioning.get_target_version())
+    assert manager.get_app_meta("app_version") == expected_version
+
+    manager.set_app_meta("app_version", "0.5.0")
+    assert manager.get_app_meta("app_version") == "0.5.0"
+
+
+def test_integrity_guard_creates_backup(
+    temp_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    paths.user_data_root.cache_clear()
+    try:
+        manager = DatabaseManager(temp_db)
+        manager.ensure_database()
+
+        monkeypatch.setattr(manager, "_is_integrity_ok", lambda: False)
+
+        with pytest.raises(DatabaseError):
+            manager.ensure_database()
+
+        archive = manager.last_integrity_backup_archive
+        assert archive is not None
+        assert archive.exists()
+        assert archive.suffix == ".zip"
+    finally:
+        paths.user_data_root.cache_clear()
 
 
 def test_record_youtube_state_transitions(temp_db: Path) -> None:
