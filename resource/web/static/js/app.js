@@ -30,6 +30,9 @@ const settingsBackupExportButton = document.getElementById("settings-backup-expo
 const settingsBackupImportInput = document.getElementById("settings-backup-import");
 const settingsImportStatusEl = document.getElementById("settings-import-status");
 const settingsResetButton = document.getElementById("settings-reset-db");
+const loggingSettingsForm = document.getElementById("logging-settings-form");
+const loggingDebugToggle = document.getElementById("logging-debug-mode");
+const loggingLogPathEl = document.getElementById("logging-log-path");
 const recordingStatusLabel = document.getElementById("recording-status-label");
 const recordingSettingsForm = document.getElementById("recording-settings-form");
 const recordingUseFfmpegInput = document.getElementById("recording-use-ffmpeg");
@@ -2272,6 +2275,7 @@ function applySnapshot(snapshot) {
   }
 
   applyRecordingSnapshot(snapshot.recording);
+  applyLoggingSnapshot(snapshot.logging);
 
   settingsMigrationEl.textContent = migrationEl.textContent;
   if (settingsMigrationTimestampEl) {
@@ -2290,6 +2294,19 @@ function applySnapshot(snapshot) {
     settingsLastBackupAtEl.textContent = snapshot.last_backup_at
       ? `最終出力：${formatDateTime(snapshot.last_backup_at)}`
       : "最終出力：未実行";
+  }
+}
+
+function applyLoggingSnapshot(logging) {
+  if (!logging) {
+    return;
+  }
+
+  if (loggingDebugToggle) {
+    loggingDebugToggle.checked = Boolean(logging.debug_mode);
+  }
+  if (loggingLogPathEl) {
+    loggingLogPathEl.textContent = logging.log_path || "―";
   }
 }
 
@@ -3340,6 +3357,36 @@ if (matchDetailYoutubeRetryButton) {
     } finally {
       matchDetailYoutubeRetryButton.disabled = false;
       matchDetailYoutubeRetryButton.textContent = originalLabel;
+    }
+  });
+}
+
+if (loggingSettingsForm) {
+  loggingSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!hasEel) {
+      showNotification("デバッグ設定は現在利用できません", 3600);
+      return;
+    }
+
+    const debugMode = loggingDebugToggle?.checked ?? false;
+    try {
+      const response = await callPy("update_logging_settings", { debug_mode: debugMode });
+      if (!response || response.ok !== true) {
+        const message = response?.error || "デバッグ設定の保存に失敗しました";
+        showNotification(message, 4200);
+        return;
+      }
+
+      if (latestSnapshot) {
+        latestSnapshot.logging = response.logging;
+      }
+      applyLoggingSnapshot(response.logging);
+      showNotification("ロガー設定を保存しました", 2400);
+    } catch (error) {
+      handleError(error, "デバッグ設定の保存に失敗しました", {
+        context: "update_logging_settings",
+      });
     }
   });
 }

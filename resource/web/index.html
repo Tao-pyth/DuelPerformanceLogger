@@ -872,6 +872,26 @@
             </dl>
           </section>
 
+          <section class="panel" aria-labelledby="logging-settings-title">
+            <div class="panel__header">
+              <h3 id="logging-settings-title">デバッグ / ログ</h3>
+              <p class="settings-subtext">詳細な処理遷移ログの出力を切り替えられます。</p>
+            </div>
+            <form id="logging-settings-form" class="stack">
+              <label class="form-field form-field--inline">
+                <span>デバッグモードを有効にする</span>
+                <input type="checkbox" id="logging-debug-mode" name="debug_mode" />
+              </label>
+              <p class="settings-subtext">
+                有効化すると実行関数名を含む詳細な処理ログを出力します。問題調査時のみ有効化してください。
+              </p>
+              <p class="settings-subtext">出力先: <code id="logging-log-path">-</code></p>
+              <div class="settings-actions">
+                <button type="submit" class="secondary-button">ログ設定を保存</button>
+              </div>
+            </form>
+          </section>
+
           <section class="panel" aria-labelledby="youtube-auth-title">
             <div class="panel__header">
               <h3 id="youtube-auth-title">YouTube 連携</h3>

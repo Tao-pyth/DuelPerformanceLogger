@@ -23,6 +23,7 @@ __all__ = [
     "record_integrity",
     "recorder",
     "retry_queue",
+    "logging_setup",
     "session_logging",
     "youtube_auth",
     "youtube_uploader",
