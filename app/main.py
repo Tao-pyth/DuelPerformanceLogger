@@ -66,6 +66,7 @@ from app.function.core import (
     config_handler,
     db_handler,
     ffmpeg_manager,
+    logging_setup,
     paths,
     ui_notify,
     versioning,
@@ -118,7 +119,7 @@ class DuelPerformanceService:
         - CLI やテストでバックエンドの単体検証を行う際の直接呼び出し。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, logging_settings: config_handler.LoggingSettings | None = None) -> None:
         """サービス起動時の構成要素を初期化します。
 
         入力
@@ -131,6 +132,10 @@ class DuelPerformanceService:
             2. データベースの存在チェックとマイグレーション結果の取得を実施。
             3. マイグレーション状態に応じてメッセージとタイムスタンプを保持します。
         """
+        self.logging_settings = (
+            logging_settings or config_handler.load_logging_settings()
+        )
+        logging_setup.configure_logging(self.logging_settings.debug_mode)
         self.config = load_config()
         self.recording_settings = config_handler.load_recording_settings()
         self.retry_queue = RetryQueue.from_mapping(self.config.get("youtube", {}))
@@ -164,6 +169,29 @@ class DuelPerformanceService:
             client_config=client_config,
             redirect_port=redirect_port,
         )
+
+    # ------------------------------------------------------------------
+    # Logging operations
+    # ------------------------------------------------------------------
+    def logging_snapshot(self) -> dict[str, Any]:
+        """現在のロギング設定を辞書化して返します。"""
+
+        return logging_setup.logging_snapshot(self.logging_settings.debug_mode)
+
+    def update_logging_settings(self, *, debug_mode: bool) -> dict[str, Any]:
+        """デバッグモードの有効/無効を切り替えます。"""
+
+        self.logging_settings = config_handler.LoggingSettings(debug_mode=debug_mode)
+        root = config_handler.load_app_settings()
+        container = config_handler.update_logging_settings(
+            self.logging_settings, root
+        )
+        config_handler.save_app_settings(container)
+        logging_setup.configure_logging(self.logging_settings.debug_mode)
+        logger.info(
+            "Logging mode updated", extra={"debug_mode": self.logging_settings.debug_mode}
+        )
+        return self.logging_snapshot()
 
     # ------------------------------------------------------------------
     # Lifecycle helpers
@@ -1577,7 +1605,9 @@ class DuelPerformanceService:
         return message
 
 
-def _ensure_service() -> DuelPerformanceService:
+def _ensure_service(
+    logging_settings: config_handler.LoggingSettings | None = None,
+) -> DuelPerformanceService:
     """シングルトンな :class:`DuelPerformanceService` インスタンスを取得します。
 
     入力
@@ -1591,7 +1621,7 @@ def _ensure_service() -> DuelPerformanceService:
     """
     global _SERVICE
     if _SERVICE is None:
-        service = DuelPerformanceService()
+        service = DuelPerformanceService(logging_settings=logging_settings)
         service.bootstrap()
         _SERVICE = service
     return _SERVICE
@@ -1610,6 +1640,22 @@ def _format_timestamp() -> str:
     """
 
     return datetime.now().strftime("%H:%M:%S（%Y/%m/%d）")
+
+
+def _initialize_logging() -> config_handler.LoggingSettings:
+    """Load persisted logging preferences and apply them."""
+
+    try:
+        settings = config_handler.load_logging_settings()
+    except Exception as exc:  # pragma: no cover - defensive path
+        logging.basicConfig(level=logging.INFO)
+        logger.warning(
+            "Failed to load logging settings; falling back to defaults", exc_info=exc
+        )
+        return config_handler.LoggingSettings()
+
+    logging_setup.configure_logging(settings.debug_mode)
+    return settings
 
 
 def _current_app_version() -> str:
@@ -1638,6 +1684,7 @@ def _build_snapshot(state: Optional[AppState] = None) -> dict[str, Any]:
     data["version"] = _current_app_version()
     if _SERVICE is not None:
         data["recording"] = _SERVICE.recording_snapshot()
+        data["logging"] = _SERVICE.logging_snapshot()
     else:
         fallback_settings = config_handler.load_recording_settings()
         data["recording"] = {
@@ -1649,6 +1696,10 @@ def _build_snapshot(state: Optional[AppState] = None) -> dict[str, Any]:
             "last_screenshot": None,
             "ffmpeg": ffmpeg_manager.inspect(fallback_settings).to_dict(),
         }
+        logging_settings = config_handler.load_logging_settings()
+        data["logging"] = logging_setup.logging_snapshot(
+            logging_settings.debug_mode
+        )
     return data
 
 
@@ -1675,14 +1726,19 @@ def _operation_response(service: DuelPerformanceService, func) -> dict[str, Any]
         1. 操作を実行し、想定済みの例外を捕捉してエラーメッセージへ変換。
         2. 成功時は :func:`_build_snapshot` を用いて最新状態を添付します。
     """
+    operation_name = getattr(func, "__name__", repr(func))
+    logger.debug("Operation start: %s", operation_name)
     try:
         outcome = func()
     except DuplicateEntryError as exc:
+        logger.warning("Operation failed: %s", operation_name, exc_info=exc)
         return {"ok": False, "error": str(exc)}
     except DatabaseError as exc:
+        logger.error("Operation failed: %s", operation_name, exc_info=exc)
         log_db_error("Database operation failed", exc)
         return {"ok": False, "error": str(exc)}
     except ValueError as exc:
+        logger.warning("Operation failed: %s", operation_name, exc_info=exc)
         return {"ok": False, "error": str(exc)}
     else:
         extra: dict[str, Any] | None = None
@@ -1707,6 +1763,7 @@ def _operation_response(service: DuelPerformanceService, func) -> dict[str, Any]
         response: dict[str, Any] = {"ok": True, "snapshot": snapshot}
         if extra is not None:
             response["data"] = extra
+        logger.debug("Operation completed: %s", operation_name)
         return response
 
 
@@ -1732,6 +1789,12 @@ def _coerce_bool(value: Any) -> bool:
         return bool(value)
     text = str(value).strip().lower()
     return text in {"1", "true", "yes", "on"}
+
+
+def _normalize_logging_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """デバッグ設定フォームの入力をサニタイズして辞書へまとめます。"""
+
+    return {"debug_mode": _coerce_bool(payload.get("debug_mode"))}
 
 
 def _normalize_recording_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -1786,6 +1849,17 @@ def get_recording_status() -> dict[str, Any]:
 
     service = _ensure_service()
     return {"ok": True, "recording": service.recording_snapshot()}
+
+
+@eel.expose
+def update_logging_settings(payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """デバッグモードのオン/オフを保存します。"""
+
+    service = _ensure_service()
+    normalized = _normalize_logging_payload(payload or {})
+    snapshot = service.update_logging_settings(**normalized)
+    ui_notify.notify("ロガー設定を更新しました", duration=2.4)
+    return {"ok": True, "logging": snapshot}
 
 
 @eel.expose
@@ -2411,8 +2485,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(version_text)
         return
 
-    logging.basicConfig(level=logging.INFO)
-    service = _ensure_service()
+    logging_settings = _initialize_logging()
+    service = _ensure_service(logging_settings=logging_settings)
     logger.info("[DPL] version=%s", service.app_version)
     eel.init(str(_WEB_ROOT))
 

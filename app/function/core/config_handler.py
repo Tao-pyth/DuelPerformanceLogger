@@ -1,4 +1,4 @@
-"""Helpers for persisting UI recording settings to ``app_settings.json``."""
+"""UI の各種設定を ``app_settings.json`` に保存・読込するためのヘルパー群。"""
 
 from __future__ import annotations
 
@@ -13,10 +13,13 @@ from .ffmpeg_command_builder import QUALITY_PRESETS, resolve_quality_preset
 
 __all__ = [
     "DEFAULT_APP_SETTINGS",
+    "LoggingSettings",
     "RecordingSettings",
     "load_app_settings",
+    "load_logging_settings",
     "save_app_settings",
     "load_recording_settings",
+    "update_logging_settings",
     "update_recording_settings",
 ]
 
@@ -40,6 +43,9 @@ def _coerce_bool(value: Any, *, default: bool = False) -> bool:
 
 
 DEFAULT_APP_SETTINGS: dict[str, Any] = {
+    "logging": {
+        "debug_mode": False,
+    },
     "recording": {
         "save_directory": str(paths.recording_dir()),
         "quality_preset": "standard",
@@ -54,6 +60,24 @@ DEFAULT_APP_SETTINGS: dict[str, Any] = {
         "video_source": "desktop",
     }
 }
+
+
+@dataclass(slots=True)
+class LoggingSettings:
+    """アプリのデバッグ／トレース設定を保持するデータクラス。"""
+
+    debug_mode: bool = False
+
+    @classmethod
+    def from_mapping(cls, mapping: Mapping[str, Any]) -> "LoggingSettings":
+        """マッピングからブール値を正規化して生成します。"""
+
+        return cls(debug_mode=_coerce_bool(mapping.get("debug_mode"), default=False))
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON へ書き戻せる辞書形式に変換します。"""
+
+        return {"debug_mode": self.debug_mode}
 
 
 @dataclass(slots=True)
@@ -228,6 +252,16 @@ def load_recording_settings(path: Path | None = None) -> RecordingSettings:
     return RecordingSettings.from_mapping(recording)
 
 
+def load_logging_settings(path: Path | None = None) -> LoggingSettings:
+    """Return :class:`LoggingSettings` loaded from persisted JSON."""
+
+    settings = load_app_settings(path)
+    logging_settings = settings.get("logging", {})
+    if not isinstance(logging_settings, Mapping):
+        logging_settings = {}
+    return LoggingSettings.from_mapping(logging_settings)
+
+
 def update_recording_settings(
     settings: RecordingSettings,
     root: MutableMapping[str, Any] | None = None,
@@ -241,4 +275,19 @@ def update_recording_settings(
         container["recording"].update(settings.to_dict())
     else:
         container["recording"] = settings.to_dict()
+    return container
+
+
+def update_logging_settings(
+    settings: LoggingSettings, root: MutableMapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """Return *root* merged with the provided :class:`LoggingSettings`."""
+
+    container: dict[str, Any] = {}
+    _deep_update(container, root or DEFAULT_APP_SETTINGS)
+    container.setdefault("logging", {})
+    if isinstance(container["logging"], MutableMapping):
+        container["logging"].update(settings.to_dict())
+    else:
+        container["logging"] = settings.to_dict()
     return container
